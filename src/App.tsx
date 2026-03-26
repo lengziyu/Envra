@@ -1,0 +1,25 @@
+import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { AppLayout } from "@/components/layout/app-layout";
+import { DashboardPage } from "@/pages/dashboard";
+import { DoctorPage } from "@/pages/doctor";
+import { ToolsPage } from "@/pages/tools";
+import { ProjectInitPage } from "@/pages/project-init";
+import { SettingsPage } from "@/pages/settings";
+
+function App() {
+  return (
+    <BrowserRouter>
+      <Routes>
+        <Route element={<AppLayout />}>
+          <Route path="/" element={<DashboardPage />} />
+          <Route path="/doctor" element={<DoctorPage />} />
+          <Route path="/tools" element={<ToolsPage />} />
+          <Route path="/init" element={<ProjectInitPage />} />
+          <Route path="/settings" element={<SettingsPage />} />
+        </Route>
+      </Routes>
+    </BrowserRouter>
+  );
+}
+
+export default App;
