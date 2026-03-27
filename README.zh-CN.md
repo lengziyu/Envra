@@ -63,7 +63,7 @@ src-tauri/target/release/bundle/
 
 - `.github/workflows/release.yml`
 
-当你推送 `v*` 格式标签（例如 `v0.1.0`）后，工作流会在 macOS / Linux / Windows 构建并上传安装包到 GitHub Releases。
+当你推送 `v*` 格式标签（例如 `v0.1.3`）后，工作流会在 macOS / Linux / Windows 构建并上传安装包到 GitHub Releases。
 
 ### 发布步骤
 
@@ -71,12 +71,18 @@ src-tauri/target/release/bundle/
 2. 创建并推送版本标签：
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.1.3
+git push origin v0.1.3
 ```
 
 3. 打开 GitHub Actions，等待 `Release` 工作流完成。
 4. 到仓库的 Releases 页面下载对应平台的安装包。
+
+### macOS 一键安装
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/lengziyu/Envra/main/scripts/install-macos.sh)
+```
 
 ## 目录结构
 

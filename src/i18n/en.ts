@@ -56,6 +56,7 @@ export const en = {
     npmMissing: "npm is not available",
     pnpmAvailable: "pnpm is available",
     pnpmMissing: "pnpm is not installed",
+    yarnAvailable: "yarn is available",
     yarnMissing: "yarn is not installed. Install via: npm i -g yarn",
     gitInstalled: "Git is installed",
     gitMissing: "Git is not installed",

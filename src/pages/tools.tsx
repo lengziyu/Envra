@@ -12,6 +12,11 @@ import { Download, Trash2, RefreshCw } from "lucide-react";
 import { useI18n } from "@/i18n";
 import { listTools, manageTool, ToolItem } from "@/lib/native";
 
+function formatVersion(version?: string): string {
+  if (!version) return "—";
+  return version.startsWith("v") ? version : `v${version}`;
+}
+
 export function ToolsPage() {
   const [tools, setTools] = useState<ToolItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -104,10 +109,10 @@ export function ToolsPage() {
                     </div>
                     <div className="flex items-center gap-3">
                       <div className="text-right">
-                        <span className="text-sm">v{tool.currentVersion ?? "—"}</span>
+                        <span className="text-sm">{formatVersion(tool.currentVersion)}</span>
                         {hasUpdate && (
                           <p className="text-xs text-muted-foreground">
-                            v{tool.latestVersion} {t.tools.versionAvailable}
+                            {formatVersion(tool.latestVersion)} {t.tools.versionAvailable}
                           </p>
                         )}
                       </div>
@@ -164,9 +169,7 @@ export function ToolsPage() {
                     <p className="text-xs text-muted-foreground mt-1">{tool.description}</p>
                   </div>
                   <div className="flex items-center gap-3">
-                    <span className="text-sm text-muted-foreground">
-                      {tool.latestVersion ? `v${tool.latestVersion}` : "—"}
-                    </span>
+                    <span className="text-sm text-muted-foreground">{formatVersion(tool.latestVersion)}</span>
                     <Button
                       size="sm"
                       onClick={() => void runAction(tool.id, "install")}

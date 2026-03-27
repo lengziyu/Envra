@@ -143,19 +143,17 @@ fn package_manager_exists(name: &str) -> bool {
     run_command(name, &["--version"], None).is_ok()
 }
 
-fn read_npm_latest(package_name: &str) -> Option<String> {
-    if !package_manager_exists("npm") {
-        return None;
-    }
-    non_empty(run_command("npm", &["view", package_name, "version"], None))
-}
-
 fn build_diagnostics() -> Vec<DiagnosticItem> {
     let node_version = non_empty(run_command("node", &["--version"], None));
     let npm_version = non_empty(run_command("npm", &["--version"], None));
     let pnpm_version = non_empty(run_command("pnpm", &["--version"], None));
     let yarn_version = non_empty(run_command("yarn", &["--version"], None));
     let git_version = non_empty(run_command("git", &["--version"], None));
+    let node_ok = node_version.is_some();
+    let npm_ok = npm_version.is_some();
+    let pnpm_ok = pnpm_version.is_some();
+    let yarn_ok = yarn_version.is_some();
+    let git_ok = git_version.is_some();
 
     let ssh_found = home_dir()
         .map(|home| home.join(".ssh/id_ed25519").exists() || home.join(".ssh/id_rsa").exists())
@@ -163,76 +161,53 @@ fn build_diagnostics() -> Vec<DiagnosticItem> {
 
     let git_name = non_empty(run_command("git", &["config", "--global", "user.name"], None));
     let git_email = non_empty(run_command("git", &["config", "--global", "user.email"], None));
+    let git_name_ok = git_name.is_some();
+    let git_email_ok = git_email.is_some();
 
     vec![
         DiagnosticItem {
             id: "node".into(),
             name: "Node.js".into(),
             category_key: "runtime".into(),
-            status: if node_version.is_some() { "ok" } else { "missing" }.into(),
+            status: if node_ok { "ok" } else { "missing" }.into(),
             version: node_version,
-            message_key: if run_command("node", &["--version"], None).is_ok() {
-                "nodeInstalled"
-            } else {
-                "nodeMissing"
-            }
-            .into(),
+            message_key: if node_ok { "nodeInstalled" } else { "nodeMissing" }.into(),
             fixable: false,
         },
         DiagnosticItem {
             id: "npm".into(),
             name: "npm".into(),
             category_key: "packageManager".into(),
-            status: if npm_version.is_some() { "ok" } else { "missing" }.into(),
+            status: if npm_ok { "ok" } else { "missing" }.into(),
             version: npm_version,
-            message_key: if run_command("npm", &["--version"], None).is_ok() {
-                "npmAvailable"
-            } else {
-                "npmMissing"
-            }
-            .into(),
+            message_key: if npm_ok { "npmAvailable" } else { "npmMissing" }.into(),
             fixable: false,
         },
         DiagnosticItem {
             id: "pnpm".into(),
             name: "pnpm".into(),
             category_key: "packageManager".into(),
-            status: if pnpm_version.is_some() { "ok" } else { "missing" }.into(),
+            status: if pnpm_ok { "ok" } else { "missing" }.into(),
             version: pnpm_version,
-            message_key: if run_command("pnpm", &["--version"], None).is_ok() {
-                "pnpmAvailable"
-            } else {
-                "pnpmMissing"
-            }
-            .into(),
-            fixable: run_command("npm", &["--version"], None).is_ok(),
+            message_key: if pnpm_ok { "pnpmAvailable" } else { "pnpmMissing" }.into(),
+            fixable: npm_ok,
         },
         DiagnosticItem {
             id: "yarn".into(),
             name: "yarn".into(),
             category_key: "packageManager".into(),
-            status: if yarn_version.is_some() { "ok" } else { "missing" }.into(),
+            status: if yarn_ok { "ok" } else { "missing" }.into(),
             version: yarn_version,
-            message_key: if run_command("yarn", &["--version"], None).is_ok() {
-                "npmAvailable"
-            } else {
-                "yarnMissing"
-            }
-            .into(),
-            fixable: run_command("npm", &["--version"], None).is_ok(),
+            message_key: if yarn_ok { "yarnAvailable" } else { "yarnMissing" }.into(),
+            fixable: npm_ok,
         },
         DiagnosticItem {
             id: "git".into(),
             name: "Git".into(),
             category_key: "versionControl".into(),
-            status: if git_version.is_some() { "ok" } else { "missing" }.into(),
+            status: if git_ok { "ok" } else { "missing" }.into(),
             version: git_version,
-            message_key: if run_command("git", &["--version"], None).is_ok() {
-                "gitInstalled"
-            } else {
-                "gitMissing"
-            }
-            .into(),
+            message_key: if git_ok { "gitInstalled" } else { "gitMissing" }.into(),
             fixable: false,
         },
         DiagnosticItem {
@@ -248,9 +223,9 @@ fn build_diagnostics() -> Vec<DiagnosticItem> {
             id: "git-config-name".into(),
             name: "Git User Name".into(),
             category_key: "gitConfig".into(),
-            status: if git_name.is_some() { "ok" } else { "error" }.into(),
+            status: if git_name_ok { "ok" } else { "error" }.into(),
             version: None,
-            message_key: if git_name.is_some() {
+            message_key: if git_name_ok {
                 "gitNameConfigured"
             } else {
                 "gitNameNotConfigured"
@@ -262,9 +237,9 @@ fn build_diagnostics() -> Vec<DiagnosticItem> {
             id: "git-config-email".into(),
             name: "Git User Email".into(),
             category_key: "gitConfig".into(),
-            status: if git_email.is_some() { "ok" } else { "error" }.into(),
+            status: if git_email_ok { "ok" } else { "error" }.into(),
             version: None,
-            message_key: if git_email.is_some() {
+            message_key: if git_email_ok {
                 "gitNameConfigured"
             } else {
                 "gitEmailNotConfigured"
@@ -415,10 +390,7 @@ fn get_system_info() -> SystemInfo {
 fn list_tools() -> Vec<ToolItem> {
     let diagnostics = build_diagnostics();
     let lookup = |id: &str| diagnostics.iter().find(|item| item.id == id);
-
-    let npm_latest = read_npm_latest("npm");
-    let pnpm_latest = read_npm_latest("pnpm");
-    let yarn_latest = read_npm_latest("yarn");
+    let current = |id: &str| lookup(id).and_then(|item| item.version.clone());
 
     vec![
         ToolItem {
@@ -435,8 +407,8 @@ fn list_tools() -> Vec<ToolItem> {
             id: "npm".into(),
             name: "npm".into(),
             description: "Node package manager".into(),
-            current_version: lookup("npm").and_then(|x| x.version.clone()),
-            latest_version: npm_latest,
+            current_version: current("npm"),
+            latest_version: current("npm"),
             installed: lookup("npm").map(|x| x.status == "ok").unwrap_or(false),
             category: "Package Manager".into(),
             managed: true,
@@ -445,8 +417,8 @@ fn list_tools() -> Vec<ToolItem> {
             id: "pnpm".into(),
             name: "pnpm".into(),
             description: "Fast, disk space efficient package manager".into(),
-            current_version: lookup("pnpm").and_then(|x| x.version.clone()),
-            latest_version: pnpm_latest,
+            current_version: current("pnpm"),
+            latest_version: current("pnpm"),
             installed: lookup("pnpm").map(|x| x.status == "ok").unwrap_or(false),
             category: "Package Manager".into(),
             managed: true,
@@ -455,8 +427,8 @@ fn list_tools() -> Vec<ToolItem> {
             id: "yarn".into(),
             name: "yarn".into(),
             description: "Reliable dependency management".into(),
-            current_version: lookup("yarn").and_then(|x| x.version.clone()),
-            latest_version: yarn_latest,
+            current_version: current("yarn"),
+            latest_version: current("yarn"),
             installed: lookup("yarn").map(|x| x.status == "ok").unwrap_or(false),
             category: "Package Manager".into(),
             managed: true,

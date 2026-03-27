@@ -1,4 +1,5 @@
 import { useLocation, useNavigate } from "react-router-dom";
+import { useEffect, useState } from "react";
 import {
   LayoutDashboard,
   Stethoscope,
@@ -8,11 +9,19 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useI18n } from "@/i18n";
+import { getVersion } from "@tauri-apps/api/app";
 
 export function Sidebar() {
   const location = useLocation();
   const navigate = useNavigate();
   const { t } = useI18n();
+  const [appVersion, setAppVersion] = useState("0.1.3");
+
+  useEffect(() => {
+    getVersion().then(setAppVersion).catch(() => {
+      setAppVersion("0.1.3");
+    });
+  }, []);
 
   const navItems = [
     { path: "/", label: t.sidebar.dashboard, icon: LayoutDashboard },
@@ -57,7 +66,7 @@ export function Sidebar() {
       <div className="border-t border-sidebar-border p-3">
         <div className="flex items-center gap-2 rounded-lg px-3 py-2">
           <div className="h-6 w-6 rounded-full bg-muted" />
-          <span className="text-xs text-sidebar-foreground/60">v0.1.0</span>
+          <span className="text-xs text-sidebar-foreground/60">{appVersion}</span>
         </div>
       </div>
     </aside>

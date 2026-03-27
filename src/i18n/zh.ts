@@ -56,6 +56,7 @@ export const zh = {
     npmMissing: "npm 不可用",
     pnpmAvailable: "pnpm 可用",
     pnpmMissing: "pnpm 未安装",
+    yarnAvailable: "yarn 可用",
     yarnMissing: "yarn 未安装。安装命令: npm i -g yarn",
     gitInstalled: "Git 已安装",
     gitMissing: "Git 未安装",

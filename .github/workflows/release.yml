@@ -21,10 +21,10 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: 22
 
@@ -70,7 +70,11 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: Envra ${{ github.ref_name }}
-          releaseBody: Automated release for ${{ github.ref_name }}.
+          releaseBody: |
+            Automated release for ${{ github.ref_name }}.
+
+            macOS quick install (download + install + remove quarantine):
+            `bash <(curl -fsSL https://raw.githubusercontent.com/lengziyu/Envra/${{ github.ref_name }}/scripts/install-macos.sh)`
           releaseDraft: false
           prerelease: false
 
@@ -82,7 +86,11 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: Envra ${{ github.ref_name }}
-          releaseBody: Automated release for ${{ github.ref_name }}.
+          releaseBody: |
+            Automated release for ${{ github.ref_name }}.
+
+            macOS quick install (download + install + remove quarantine):
+            `bash <(curl -fsSL https://raw.githubusercontent.com/lengziyu/Envra/${{ github.ref_name }}/scripts/install-macos.sh)`
           releaseDraft: false
           prerelease: false
 
@@ -100,6 +108,10 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: Envra ${{ github.ref_name }}
-          releaseBody: Automated release for ${{ github.ref_name }}.
+          releaseBody: |
+            Automated release for ${{ github.ref_name }}.
+
+            macOS quick install (download + install + remove quarantine):
+            `bash <(curl -fsSL https://raw.githubusercontent.com/lengziyu/Envra/${{ github.ref_name }}/scripts/install-macos.sh)`
           releaseDraft: false
           prerelease: false
