@@ -45,66 +45,10 @@ jobs:
       - name: Install npm dependencies
         run: npm install
 
-      - name: Detect macOS signing config
-        id: mac_signing
-        if: matrix.runner == 'macos-latest'
-        env:
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: |
-          if [[ -n "$APPLE_CERTIFICATE" && -n "$APPLE_CERTIFICATE_PASSWORD" && -n "$APPLE_SIGNING_IDENTITY" && -n "$APPLE_ID" && -n "$APPLE_PASSWORD" && -n "$APPLE_TEAM_ID" ]]; then
-            echo "enabled=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "enabled=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Build and upload release assets (Linux/Windows)
-        if: matrix.runner != 'macos-latest'
+      - name: Build and upload release assets
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tagName: ${{ github.ref_name }}
-          releaseName: Envra ${{ github.ref_name }}
-          releaseBody: |
-            Automated release for ${{ github.ref_name }}.
-
-            macOS quick install (download + install + remove quarantine):
-            `bash <(curl -fsSL https://raw.githubusercontent.com/lengziyu/Envra/${{ github.ref_name }}/scripts/install-macos.sh)`
-          releaseDraft: false
-          prerelease: false
-
-      - name: Build and upload release assets (macOS unsigned)
-        if: matrix.runner == 'macos-latest' && steps.mac_signing.outputs.enabled != 'true'
-        uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tagName: ${{ github.ref_name }}
-          releaseName: Envra ${{ github.ref_name }}
-          releaseBody: |
-            Automated release for ${{ github.ref_name }}.
-
-            macOS quick install (download + install + remove quarantine):
-            `bash <(curl -fsSL https://raw.githubusercontent.com/lengziyu/Envra/${{ github.ref_name }}/scripts/install-macos.sh)`
-          releaseDraft: false
-          prerelease: false
-
-      - name: Build and upload release assets (macOS signed/notarized)
-        if: matrix.runner == 'macos-latest' && steps.mac_signing.outputs.enabled == 'true'
-        uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: Envra ${{ github.ref_name }}
