@@ -95,3 +95,14 @@ src-tauri/           # Rust entry and Tauri config
   - Ensure Rust is installed and cargo is in PATH.
 - `Port 1420 is already in use`:
   - Stop the process using port 1420, then rerun `npm run tauri dev`.
+- macOS says app is damaged/cannot open:
+  - Prefer downloading the `.dmg` artifact from Releases.
+  - If this is an unsigned build, remove quarantine flag:
+    - `xattr -cr /Applications/Envra.app`
+  - For production distribution, configure Apple signing/notarization secrets in GitHub Actions:
+    - `APPLE_CERTIFICATE`
+    - `APPLE_CERTIFICATE_PASSWORD`
+    - `APPLE_SIGNING_IDENTITY`
+    - `APPLE_ID`
+    - `APPLE_PASSWORD`
+    - `APPLE_TEAM_ID`

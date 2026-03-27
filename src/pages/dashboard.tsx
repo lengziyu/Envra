@@ -9,38 +9,84 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   CheckCircle2,
+  AlertTriangle,
   Terminal,
   GitBranch,
   Key,
   ArrowRight,
+  RefreshCw,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useI18n } from "@/i18n";
+import { useEffect, useMemo, useState } from "react";
+import {
+  DiagnosticItem,
+  getSystemInfo,
+  scanEnvironment,
+  SystemInfo,
+} from "@/lib/native";
 
-const envStatus = [
-  { name: "Node.js", version: "v20.11.0", status: "ok" as const, icon: Terminal },
-  { name: "npm", version: "10.2.4", status: "ok" as const, icon: Terminal },
-  { name: "pnpm", version: "8.15.1", status: "ok" as const, icon: Terminal },
-  { name: "Git", version: "2.43.0", status: "ok" as const, icon: GitBranch },
-  { name: "SSH", version: "Configured", status: "ok" as const, icon: Key },
-  { name: "yarn", version: "—", status: "missing" as const, icon: Terminal },
-];
+function iconFor(id: string) {
+  if (id.includes("git")) return GitBranch;
+  if (id.includes("ssh")) return Key;
+  return Terminal;
+}
 
 export function DashboardPage() {
   const navigate = useNavigate();
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
+  const [envStatus, setEnvStatus] = useState<DiagnosticItem[]>([]);
+  const [systemInfo, setSystemInfo] = useState<SystemInfo | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
   const quickActions = [
-    { label: t.dashboard.runEnvCheck, path: "/doctor" },
+    { label: t.dashboard.runEnvCheck, path: "/doctor", primary: true },
     { label: t.dashboard.manageTools, path: "/tools" },
     { label: t.dashboard.initProject, path: "/init" },
   ];
 
+  const load = async () => {
+    try {
+      setLoading(true);
+      setError("");
+      const [diagnostics, system] = await Promise.all([
+        scanEnvironment(),
+        getSystemInfo(),
+      ]);
+      setEnvStatus(diagnostics);
+      setSystemInfo(system);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void load();
+  }, []);
+
+  const okCount = useMemo(
+    () => envStatus.filter((item) => item.status === "ok").length,
+    [envStatus]
+  );
+  const issueCount = useMemo(
+    () => envStatus.filter((item) => item.status !== "ok").length,
+    [envStatus]
+  );
+
   return (
     <div className="space-y-8">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">{t.dashboard.title}</h1>
-        <p className="text-muted-foreground mt-1">{t.dashboard.subtitle}</p>
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">{t.dashboard.title}</h1>
+          <p className="text-muted-foreground mt-1">{t.dashboard.subtitle}</p>
+        </div>
+        <Button variant="outline" onClick={() => void load()} className="gap-2">
+          <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+          {locale === "zh" ? "刷新" : "Refresh"}
+        </Button>
       </div>
 
       <div className="grid gap-4 md:grid-cols-3">
@@ -48,7 +94,7 @@ export function DashboardPage() {
           <CardHeader className="pb-2">
             <CardDescription>{t.dashboard.toolsDetected}</CardDescription>
             <CardTitle className="text-3xl">
-              {envStatus.filter((e) => e.status === "ok").length}
+              {okCount}
               <span className="text-lg text-muted-foreground font-normal">
                 /{envStatus.length}
               </span>
@@ -56,7 +102,7 @@ export function DashboardPage() {
           </CardHeader>
           <CardContent>
             <p className="text-xs text-muted-foreground">
-              {envStatus.filter((e) => e.status === "missing").length}
+              {issueCount}
               {t.dashboard.toolsMissing}
             </p>
           </CardContent>
@@ -66,22 +112,36 @@ export function DashboardPage() {
           <CardHeader className="pb-2">
             <CardDescription>{t.dashboard.envHealth}</CardDescription>
             <CardTitle className="text-3xl flex items-center gap-2">
-              <CheckCircle2 className="h-6 w-6 text-emerald-500" />
-              {t.dashboard.good}
+              {issueCount === 0 ? (
+                <CheckCircle2 className="h-6 w-6 text-emerald-500" />
+              ) : (
+                <AlertTriangle className="h-6 w-6 text-orange-500" />
+              )}
+              {issueCount === 0 ? t.dashboard.good : `${issueCount} ${t.doctor.issues}`}
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-xs text-muted-foreground">{t.dashboard.allCritical}</p>
+            <p className="text-xs text-muted-foreground">
+              {issueCount === 0
+                ? t.dashboard.allCritical
+                : locale === "zh"
+                  ? "请前往环境诊断页查看并修复问题。"
+                  : "Run Environment Doctor for suggested fixes."}
+            </p>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className="pb-2">
             <CardDescription>{t.dashboard.system}</CardDescription>
-            <CardTitle className="text-lg">macOS 14.2</CardTitle>
+            <CardTitle className="text-lg">
+              {systemInfo ? `${systemInfo.osName} ${systemInfo.osVersion}` : "—"}
+            </CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-xs text-muted-foreground">Apple Silicon (arm64)</p>
+            <p className="text-xs text-muted-foreground">
+              {systemInfo ? systemInfo.arch : "unknown"}
+            </p>
           </CardContent>
         </Card>
       </div>
@@ -93,23 +153,34 @@ export function DashboardPage() {
         </CardHeader>
         <CardContent>
           <div className="space-y-3">
+            {!loading && envStatus.length === 0 && (
+              <p className="text-sm text-muted-foreground">
+                {locale === "zh" ? "暂无诊断结果。" : "No diagnostics data yet."}
+              </p>
+            )}
+            {error && <Badge variant="destructive">{error}</Badge>}
             {envStatus.map((tool) => (
               <div
                 key={tool.name}
                 className="flex items-center justify-between rounded-lg border p-3"
               >
                 <div className="flex items-center gap-3">
-                  <tool.icon className="h-4 w-4 text-muted-foreground" />
+                  {(() => {
+                    const Icon = iconFor(tool.id);
+                    return <Icon className="h-4 w-4 text-muted-foreground" />;
+                  })()}
                   <span className="text-sm font-medium">{tool.name}</span>
                 </div>
                 <div className="flex items-center gap-3">
                   <span className="text-sm text-muted-foreground">
-                    {tool.version}
+                    {tool.version ?? "—"}
                   </span>
                   {tool.status === "ok" ? (
                     <Badge variant="success">{t.common.ok}</Badge>
                   ) : (
-                    <Badge variant="destructive">{t.common.missing}</Badge>
+                    <Badge variant={tool.status === "error" ? "destructive" : "secondary"}>
+                      {tool.status === "error" ? t.common.error : t.common.missing}
+                    </Badge>
                   )}
                 </div>
               </div>
@@ -127,7 +198,7 @@ export function DashboardPage() {
             {quickActions.map((action) => (
               <Button
                 key={action.path}
-                variant="outline"
+                variant={action.primary ? "default" : "outline"}
                 onClick={() => navigate(action.path)}
                 className="gap-2"
               >

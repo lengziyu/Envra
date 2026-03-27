@@ -1,12 +1,20 @@
 import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { useEffect } from "react";
 import { AppLayout } from "@/components/layout/app-layout";
 import { DashboardPage } from "@/pages/dashboard";
 import { DoctorPage } from "@/pages/doctor";
 import { ToolsPage } from "@/pages/tools";
 import { ProjectInitPage } from "@/pages/project-init";
 import { SettingsPage } from "@/pages/settings";
+import { useAppSettings } from "@/stores/settings";
 
 function App() {
+  const theme = useAppSettings((state) => state.theme);
+
+  useEffect(() => {
+    document.documentElement.classList.toggle("dark", theme === "dark");
+  }, [theme]);
+
   return (
     <BrowserRouter>
       <Routes>

@@ -94,3 +94,14 @@ src-tauri/           # Rust 入口与 Tauri 配置
   - Rust 已安装但 PATH 未生效，需补充 cargo 路径。
 - `Port 1420 is already in use`：
   - 结束占用 1420 端口的进程后重试 `npm run tauri dev`。
+- macOS 提示“应用已损坏，无法打开”：
+  - 建议优先下载 Releases 中的 `.dmg` 安装包。
+  - 若为未签名构建，可先移除隔离属性：
+    - `xattr -cr /Applications/Envra.app`
+  - 正式分发建议在 GitHub Actions 配置 Apple 签名/公证 secrets：
+    - `APPLE_CERTIFICATE`
+    - `APPLE_CERTIFICATE_PASSWORD`
+    - `APPLE_SIGNING_IDENTITY`
+    - `APPLE_ID`
+    - `APPLE_PASSWORD`
+    - `APPLE_TEAM_ID`

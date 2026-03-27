@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Card,
   CardContent,
@@ -16,29 +16,7 @@ import {
   Wrench,
 } from "lucide-react";
 import { useI18n } from "@/i18n";
-
-type Status = "ok" | "missing" | "error";
-
-interface DiagnosticItem {
-  id: string;
-  name: string;
-  categoryKey: string;
-  status: Status;
-  version?: string;
-  messageKey: string;
-  fixable: boolean;
-}
-
-const initialDiagnostics: DiagnosticItem[] = [
-  { id: "node", name: "Node.js", categoryKey: "runtime", status: "ok", version: "v20.11.0", messageKey: "nodeInstalled", fixable: false },
-  { id: "npm", name: "npm", categoryKey: "packageManager", status: "ok", version: "10.2.4", messageKey: "npmAvailable", fixable: false },
-  { id: "pnpm", name: "pnpm", categoryKey: "packageManager", status: "ok", version: "8.15.1", messageKey: "pnpmAvailable", fixable: false },
-  { id: "yarn", name: "yarn", categoryKey: "packageManager", status: "missing", messageKey: "yarnMissing", fixable: true },
-  { id: "git", name: "Git", categoryKey: "versionControl", status: "ok", version: "2.43.0", messageKey: "gitInstalled", fixable: false },
-  { id: "ssh", name: "SSH Key", categoryKey: "authentication", status: "ok", messageKey: "sshFound", fixable: false },
-  { id: "git-config-name", name: "Git User Name", categoryKey: "gitConfig", status: "ok", messageKey: "gitNameConfigured", fixable: true },
-  { id: "git-config-email", name: "Git User Email", categoryKey: "gitConfig", status: "error", messageKey: "gitEmailNotConfigured", fixable: true },
-];
+import { DiagnosticItem, fixIssue, scanEnvironment } from "@/lib/native";
 
 const statusIcon = {
   ok: <CheckCircle2 className="h-4 w-4 text-emerald-500" />,
@@ -47,9 +25,12 @@ const statusIcon = {
 };
 
 export function DoctorPage() {
-  const [diagnostics, setDiagnostics] = useState(initialDiagnostics);
+  const [diagnostics, setDiagnostics] = useState<DiagnosticItem[]>([]);
   const [scanning, setScanning] = useState(false);
-  const { t } = useI18n();
+  const [fixingId, setFixingId] = useState<string | null>(null);
+  const [notice, setNotice] = useState("");
+  const [error, setError] = useState("");
+  const { t, locale } = useI18n();
 
   const statusBadge = {
     ok: <Badge variant="success">{t.common.ok}</Badge>,
@@ -57,19 +38,53 @@ export function DoctorPage() {
     error: <Badge variant="destructive">{t.common.error}</Badge>,
   };
 
-  const handleScan = () => {
-    setScanning(true);
-    setTimeout(() => setScanning(false), 1500);
+  const handleScan = async () => {
+    try {
+      setScanning(true);
+      setError("");
+      const result = await scanEnvironment();
+      setDiagnostics(result);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setScanning(false);
+    }
   };
 
-  const handleFix = (id: string) => {
-    setDiagnostics((prev) =>
-      prev.map((d) =>
-        d.id === id
-          ? { ...d, status: "ok" as Status, messageKey: "fixed" }
-          : d
-      )
-    );
+  useEffect(() => {
+    void handleScan();
+  }, []);
+
+  const handleFix = async (id: string) => {
+    try {
+      setFixingId(id);
+      setNotice("");
+      setError("");
+      let inputValue: string | undefined;
+
+      if (id === "git-config-name") {
+        const value = window.prompt(
+          locale === "zh" ? "请输入 Git user.name：" : "Enter Git user.name:"
+        );
+        if (value === null) return;
+        inputValue = value;
+      }
+      if (id === "git-config-email") {
+        const value = window.prompt(
+          locale === "zh" ? "请输入 Git user.email：" : "Enter Git user.email:"
+        );
+        if (value === null) return;
+        inputValue = value;
+      }
+
+      const result = await fixIssue(id, inputValue);
+      setNotice(result.message || (locale === "zh" ? "修复完成。" : "Fixed."));
+      await handleScan();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setFixingId(null);
+    }
   };
 
   const okCount = diagnostics.filter((d) => d.status === "ok").length;
@@ -125,6 +140,8 @@ export function DoctorPage() {
         </CardHeader>
         <CardContent>
           <div className="space-y-3">
+            {notice && <Badge variant="success">{notice}</Badge>}
+            {error && <Badge variant="destructive">{error}</Badge>}
             {diagnostics.map((item) => (
               <div
                 key={item.id}
@@ -153,11 +170,16 @@ export function DoctorPage() {
                     <Button
                       size="sm"
                       variant="outline"
-                      onClick={() => handleFix(item.id)}
+                      onClick={() => void handleFix(item.id)}
+                      disabled={fixingId === item.id}
                       className="gap-1"
                     >
-                      <Wrench className="h-3 w-3" />
-                      {t.common.fix}
+                      <Wrench className={`h-3 w-3 ${fixingId === item.id ? "animate-pulse" : ""}`} />
+                      {fixingId === item.id
+                        ? locale === "zh"
+                          ? "修复中..."
+                          : "Fixing..."
+                        : t.common.fix}
                     </Button>
                   )}
                 </div>

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Card,
   CardContent,
@@ -10,55 +10,75 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Download, Trash2, RefreshCw } from "lucide-react";
 import { useI18n } from "@/i18n";
-
-interface Tool {
-  id: string;
-  name: string;
-  description: string;
-  currentVersion?: string;
-  latestVersion: string;
-  installed: boolean;
-  category: string;
-}
-
-const initialTools: Tool[] = [
-  { id: "node", name: "Node.js", description: "JavaScript runtime built on V8", currentVersion: "20.11.0", latestVersion: "22.0.0", installed: true, category: "Runtime" },
-  { id: "npm", name: "npm", description: "Node package manager", currentVersion: "10.2.4", latestVersion: "10.5.0", installed: true, category: "Package Manager" },
-  { id: "pnpm", name: "pnpm", description: "Fast, disk space efficient package manager", currentVersion: "8.15.1", latestVersion: "9.0.0", installed: true, category: "Package Manager" },
-  { id: "yarn", name: "yarn", description: "Reliable dependency management", latestVersion: "4.1.0", installed: false, category: "Package Manager" },
-  { id: "git", name: "Git", description: "Distributed version control system", currentVersion: "2.43.0", latestVersion: "2.44.0", installed: true, category: "Version Control" },
-  { id: "nvm", name: "nvm", description: "Node Version Manager", latestVersion: "0.39.7", installed: false, category: "Version Manager" },
-];
+import { listTools, manageTool, ToolItem } from "@/lib/native";
 
 export function ToolsPage() {
-  const [tools, setTools] = useState(initialTools);
-  const { t } = useI18n();
+  const [tools, setTools] = useState<ToolItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [busyKey, setBusyKey] = useState<string | null>(null);
+  const [notice, setNotice] = useState("");
+  const [error, setError] = useState("");
+  const { t, locale } = useI18n();
 
-  const handleInstall = (id: string) => {
-    setTools((prev) =>
-      prev.map((tool) =>
-        tool.id === id ? { ...tool, installed: true, currentVersion: tool.latestVersion } : tool
-      )
-    );
+  const refreshTools = async () => {
+    try {
+      setLoading(true);
+      setError("");
+      const result = await listTools();
+      setTools(result);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleUninstall = (id: string) => {
-    setTools((prev) =>
-      prev.map((tool) =>
-        tool.id === id ? { ...tool, installed: false, currentVersion: undefined } : tool
-      )
-    );
+  useEffect(() => {
+    void refreshTools();
+  }, []);
+
+  const runAction = async (
+    toolId: string,
+    action: "install" | "update" | "uninstall"
+  ) => {
+    try {
+      setBusyKey(`${toolId}:${action}`);
+      setNotice("");
+      setError("");
+      const result = await manageTool(toolId, action);
+      setNotice(result.message || "Done.");
+      await refreshTools();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusyKey(null);
+    }
   };
 
-  const installed = tools.filter((tool) => tool.installed);
-  const available = tools.filter((tool) => !tool.installed);
+  const installed = useMemo(
+    () => tools.filter((tool) => tool.installed),
+    [tools]
+  );
+  const available = useMemo(
+    () => tools.filter((tool) => !tool.installed),
+    [tools]
+  );
 
   return (
     <div className="space-y-8">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">{t.tools.title}</h1>
-        <p className="text-muted-foreground mt-1">{t.tools.subtitle}</p>
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">{t.tools.title}</h1>
+          <p className="text-muted-foreground mt-1">{t.tools.subtitle}</p>
+        </div>
+        <Button variant="outline" className="gap-2" onClick={() => void refreshTools()}>
+          <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+          {locale === "zh" ? "刷新" : "Refresh"}
+        </Button>
       </div>
+
+      {notice && <Badge variant="success">{notice}</Badge>}
+      {error && <Badge variant="destructive">{error}</Badge>}
 
       {installed.length > 0 && (
         <Card>
@@ -69,7 +89,10 @@ export function ToolsPage() {
           <CardContent>
             <div className="space-y-3">
               {installed.map((tool) => {
-                const hasUpdate = tool.currentVersion !== tool.latestVersion;
+                const hasUpdate =
+                  !!tool.latestVersion &&
+                  !!tool.currentVersion &&
+                  tool.currentVersion !== tool.latestVersion;
                 return (
                   <div key={tool.id} className="flex items-center justify-between rounded-lg border p-4">
                     <div>
@@ -81,7 +104,7 @@ export function ToolsPage() {
                     </div>
                     <div className="flex items-center gap-3">
                       <div className="text-right">
-                        <span className="text-sm">v{tool.currentVersion}</span>
+                        <span className="text-sm">v{tool.currentVersion ?? "—"}</span>
                         {hasUpdate && (
                           <p className="text-xs text-muted-foreground">
                             v{tool.latestVersion} {t.tools.versionAvailable}
@@ -89,7 +112,13 @@ export function ToolsPage() {
                         )}
                       </div>
                       {hasUpdate && (
-                        <Button size="sm" variant="outline" className="gap-1">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="gap-1"
+                          onClick={() => void runAction(tool.id, "update")}
+                          disabled={!tool.managed || busyKey === `${tool.id}:update`}
+                        >
                           <RefreshCw className="h-3 w-3" />
                           {t.common.update}
                         </Button>
@@ -97,7 +126,8 @@ export function ToolsPage() {
                       <Button
                         size="sm"
                         variant="ghost"
-                        onClick={() => handleUninstall(tool.id)}
+                        onClick={() => void runAction(tool.id, "uninstall")}
+                        disabled={!tool.managed || busyKey === `${tool.id}:uninstall`}
                         className="text-muted-foreground hover:text-destructive"
                       >
                         <Trash2 className="h-3 w-3" />
@@ -106,6 +136,11 @@ export function ToolsPage() {
                   </div>
                 );
               })}
+              {loading && (
+                <p className="text-sm text-muted-foreground">
+                  {locale === "zh" ? "加载中..." : "Loading..."}
+                </p>
+              )}
             </div>
           </CardContent>
         </Card>
@@ -129,8 +164,15 @@ export function ToolsPage() {
                     <p className="text-xs text-muted-foreground mt-1">{tool.description}</p>
                   </div>
                   <div className="flex items-center gap-3">
-                    <span className="text-sm text-muted-foreground">v{tool.latestVersion}</span>
-                    <Button size="sm" onClick={() => handleInstall(tool.id)} className="gap-1">
+                    <span className="text-sm text-muted-foreground">
+                      {tool.latestVersion ? `v${tool.latestVersion}` : "—"}
+                    </span>
+                    <Button
+                      size="sm"
+                      onClick={() => void runAction(tool.id, "install")}
+                      disabled={!tool.managed || busyKey === `${tool.id}:install`}
+                      className="gap-1"
+                    >
                       <Download className="h-3 w-3" />
                       {t.common.install}
                     </Button>

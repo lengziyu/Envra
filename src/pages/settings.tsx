@@ -12,13 +12,20 @@ import { Select } from "@/components/ui/select";
 import { Moon, Sun, Save, Languages } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useI18n } from "@/i18n";
+import { useAppSettings, RegistryMode } from "@/stores/settings";
 
 export function SettingsPage() {
   const { t, locale, setLocale } = useI18n();
-  const [theme, setTheme] = useState<"light" | "dark">("dark");
-  const [registry, setRegistry] = useState("https://registry.npmmirror.com");
-  const [installPath, setInstallPath] = useState("/usr/local");
-  const [proxy, setProxy] = useState("");
+  const theme = useAppSettings((state) => state.theme);
+  const registryMode = useAppSettings((state) => state.registryMode);
+  const customRegistry = useAppSettings((state) => state.customRegistry);
+  const installPath = useAppSettings((state) => state.installPath);
+  const proxy = useAppSettings((state) => state.proxy);
+  const setTheme = useAppSettings((state) => state.setTheme);
+  const setRegistryMode = useAppSettings((state) => state.setRegistryMode);
+  const setCustomRegistry = useAppSettings((state) => state.setCustomRegistry);
+  const setInstallPath = useAppSettings((state) => state.setInstallPath);
+  const setProxy = useAppSettings((state) => state.setProxy);
   const [saved, setSaved] = useState(false);
 
   const toggleTheme = (newTheme: "light" | "dark") => {
@@ -122,13 +129,21 @@ export function SettingsPage() {
             <CardDescription>{t.settings.registryDesc}</CardDescription>
           </CardHeader>
           <CardContent>
-            <Select value={registry} onChange={(e) => setRegistry(e.target.value)}>
-              <option value="https://registry.npmjs.org">{t.settings.registryOfficial}</option>
-              <option value="https://registry.npmmirror.com">{t.settings.registryChina}</option>
+            <Select
+              value={registryMode}
+              onChange={(e) => setRegistryMode(e.target.value as RegistryMode)}
+            >
+              <option value="official">{t.settings.registryOfficial}</option>
+              <option value="china">{t.settings.registryChina}</option>
               <option value="custom">{t.settings.registryCustom}</option>
             </Select>
-            {registry === "custom" && (
-              <Input className="mt-3" placeholder="https://your-registry.com" />
+            {registryMode === "custom" && (
+              <Input
+                className="mt-3"
+                placeholder="https://your-registry.com"
+                value={customRegistry}
+                onChange={(e) => setCustomRegistry(e.target.value)}
+              />
             )}
           </CardContent>
         </Card>

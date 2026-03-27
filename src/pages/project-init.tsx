@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Card,
   CardContent,
@@ -12,6 +12,8 @@ import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { FolderPlus, Check } from "lucide-react";
 import { useI18n } from "@/i18n";
+import { createProject, defaultProjectBase } from "@/lib/native";
+import { useAppSettings } from "@/stores/settings";
 
 const nodeVersions = ["22.0.0", "20.11.0", "18.19.0"];
 const packageManagers = ["npm", "pnpm", "yarn"];
@@ -22,8 +24,13 @@ export function ProjectInitPage() {
   const [selectedNode, setSelectedNode] = useState(nodeVersions[1]);
   const [selectedPM, setSelectedPM] = useState(packageManagers[1]);
   const [initGit, setInitGit] = useState(true);
+  const [targetPath, setTargetPath] = useState("");
   const [created, setCreated] = useState(false);
-  const { t } = useI18n();
+  const [creating, setCreating] = useState(false);
+  const [createdPath, setCreatedPath] = useState("");
+  const [error, setError] = useState("");
+  const { t, locale } = useI18n();
+  const installPath = useAppSettings((state) => state.installPath);
 
   const templates = [
     { id: "react-ts", name: t.init.reactTs, description: t.init.reactTsDesc },
@@ -34,10 +41,37 @@ export function ProjectInitPage() {
 
   const canCreate = projectName.trim() && selectedTemplate;
 
-  const handleCreate = () => {
+  useEffect(() => {
+    if (installPath.trim()) {
+      setTargetPath(installPath);
+      return;
+    }
+    defaultProjectBase()
+      .then((path) => setTargetPath(path))
+      .catch(() => setTargetPath("~/Projects"));
+  }, [installPath]);
+
+  const handleCreate = async () => {
     if (!canCreate) return;
-    setCreated(true);
-    setTimeout(() => setCreated(false), 3000);
+    try {
+      setCreating(true);
+      setError("");
+      const result = await createProject({
+        projectName: projectName.trim(),
+        template: selectedTemplate,
+        packageManager: selectedPM,
+        initGit,
+        basePath: targetPath.trim(),
+        selectedNode: selectedNode,
+      });
+      setCreated(true);
+      setCreatedPath(result.path);
+      setTimeout(() => setCreated(false), 3000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setCreating(false);
+    }
   };
 
   return (
@@ -58,6 +92,12 @@ export function ProjectInitPage() {
                 placeholder="my-awesome-project"
                 value={projectName}
                 onChange={(e) => setProjectName(e.target.value)}
+              />
+              <Input
+                className="mt-3"
+                placeholder="~/Projects"
+                value={targetPath}
+                onChange={(e) => setTargetPath(e.target.value)}
               />
             </CardContent>
           </Card>
@@ -162,9 +202,14 @@ export function ProjectInitPage() {
             className="w-full gap-2"
             size="lg"
             disabled={!canCreate}
-            onClick={handleCreate}
+            onClick={() => void handleCreate()}
           >
-            {created ? (
+            {creating ? (
+              <>
+                <FolderPlus className="h-4 w-4 animate-pulse" />
+                {locale === "zh" ? "创建中..." : "Creating..."}
+              </>
+            ) : created ? (
               <>
                 <Check className="h-4 w-4" />
                 {t.init.projectCreated}
@@ -177,6 +222,8 @@ export function ProjectInitPage() {
             )}
           </Button>
 
+          {error && <Badge variant="destructive">{error}</Badge>}
+
           {projectName && selectedTemplate && (
             <Card>
               <CardHeader className="pb-3">
@@ -187,6 +234,12 @@ export function ProjectInitPage() {
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">{t.init.name}</span>
                     <span className="font-medium">{projectName}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">
+                      {locale === "zh" ? "路径" : "Path"}
+                    </span>
+                    <span className="max-w-[60%] truncate text-right">{targetPath || "—"}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">{t.init.template}</span>
@@ -205,6 +258,18 @@ export function ProjectInitPage() {
                     <span>{initGit ? t.common.yes : t.common.no}</span>
                   </div>
                 </div>
+              </CardContent>
+            </Card>
+          )}
+          {createdPath && (
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm">
+                  {locale === "zh" ? "结果" : "Result"}
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-sm text-muted-foreground break-all">{createdPath}</p>
               </CardContent>
             </Card>
           )}
