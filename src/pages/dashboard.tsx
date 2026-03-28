@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Activity,
@@ -15,12 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useI18n } from "@/i18n";
-import {
-  DiagnosticItem,
-  getSystemInfo,
-  scanEnvironment,
-  SystemInfo,
-} from "@/lib/native";
+import { useEnvironmentStore } from "@/stores/environment";
 
 const categoryOrder = [
   "runtime",
@@ -33,30 +28,14 @@ const categoryOrder = [
 export function DashboardPage() {
   const navigate = useNavigate();
   const { t, locale } = useI18n();
-  const [envStatus, setEnvStatus] = useState<DiagnosticItem[]>([]);
-  const [systemInfo, setSystemInfo] = useState<SystemInfo | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-
-  const load = async () => {
-    try {
-      setLoading(true);
-      setError("");
-      const [diagnostics, system] = await Promise.all([
-        scanEnvironment(),
-        getSystemInfo(),
-      ]);
-      setEnvStatus(diagnostics);
-      setSystemInfo(system);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setLoading(false);
-    }
-  };
+  const envStatus = useEnvironmentStore((state) => state.diagnostics);
+  const systemInfo = useEnvironmentStore((state) => state.systemInfo);
+  const loading = useEnvironmentStore((state) => state.envLoading);
+  const error = useEnvironmentStore((state) => state.envError);
+  const loadEnvironment = useEnvironmentStore((state) => state.loadEnvironment);
 
   useEffect(() => {
-    void load();
+    void loadEnvironment();
   }, []);
 
   const okCount = useMemo(
@@ -133,7 +112,11 @@ export function DashboardPage() {
           <h1 className="text-2xl font-bold tracking-tight">{t.dashboard.title}</h1>
           <p className="text-muted-foreground mt-1">{t.dashboard.subtitle}</p>
         </div>
-        <Button variant="outline" onClick={() => void load()} className="gap-2">
+        <Button
+          variant="outline"
+          onClick={() => void loadEnvironment(true)}
+          className="gap-2"
+        >
           <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
           {locale === "zh" ? "刷新" : "Refresh"}
         </Button>

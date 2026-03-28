@@ -4,6 +4,11 @@ use std::{
     path::{Path, PathBuf},
     process::Command,
 };
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -70,12 +75,129 @@ fn home_dir() -> Option<PathBuf> {
         .or_else(|| env::var_os("USERPROFILE").map(PathBuf::from))
 }
 
-fn run_command(program: &str, args: &[&str], cwd: Option<&Path>) -> Result<String, String> {
-    let mut command = Command::new(program);
-    command.args(args);
+fn common_bin_dirs() -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+
+    if let Some(path) = env::var_os("PATH") {
+        dirs.extend(env::split_paths(&path));
+    }
+
+    if let Some(home) = home_dir() {
+        dirs.push(home.join(".cargo/bin"));
+        dirs.push(home.join(".local/bin"));
+        dirs.push(home.join(".volta/bin"));
+        dirs.push(home.join(".fnm"));
+        dirs.push(home.join(".nvm"));
+
+        let nvm_versions = home.join(".nvm/versions/node");
+        if let Ok(entries) = fs::read_dir(nvm_versions) {
+            for entry in entries.flatten() {
+                dirs.push(entry.path().join("bin"));
+            }
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let vars = [
+            "ProgramFiles",
+            "ProgramFiles(x86)",
+            "LocalAppData",
+            "AppData",
+            "NVM_HOME",
+            "NVM_SYMLINK",
+        ];
+
+        for key in vars {
+            if let Some(value) = env::var_os(key) {
+                let base = PathBuf::from(value);
+                match key {
+                    "ProgramFiles" | "ProgramFiles(x86)" => dirs.push(base.join("nodejs")),
+                    "LocalAppData" => {
+                        dirs.push(base.join("Programs/nodejs"));
+                        dirs.push(base.join("Microsoft/WindowsApps"));
+                    }
+                    "AppData" => dirs.push(base.join("npm")),
+                    _ => dirs.push(base),
+                }
+            }
+        }
+
+        if let Some(home) = home_dir() {
+            dirs.push(home.join("scoop/shims"));
+            dirs.push(home.join("AppData/Roaming/npm"));
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        dirs.push(PathBuf::from("/opt/homebrew/bin"));
+        dirs.push(PathBuf::from("/usr/local/bin"));
+        dirs.push(PathBuf::from("/usr/bin"));
+        dirs.push(PathBuf::from("/bin"));
+        dirs.push(PathBuf::from("/opt/local/bin"));
+    }
+
+    let mut unique = Vec::new();
+    for dir in dirs {
+        if dir.as_os_str().is_empty() {
+            continue;
+        }
+        if !unique.iter().any(|existing: &PathBuf| existing == &dir) {
+            unique.push(dir);
+        }
+    }
+    unique
+}
+
+fn augmented_path_value() -> Option<String> {
+    let dirs = common_bin_dirs();
+    env::join_paths(dirs)
+        .ok()
+        .and_then(|value| value.into_string().ok())
+}
+
+fn resolve_program(program: &str) -> PathBuf {
+    let path = PathBuf::from(program);
+    if path.components().count() > 1 && path.exists() {
+        return path;
+    }
+
+    #[cfg(target_os = "windows")]
+    let candidates = [program.to_string(), format!("{program}.exe"), format!("{program}.cmd"), format!("{program}.bat")];
+    #[cfg(not(target_os = "windows"))]
+    let candidates = [program.to_string()];
+
+    for dir in common_bin_dirs() {
+        for candidate in &candidates {
+            let full = dir.join(candidate);
+            if full.exists() {
+                return full;
+            }
+        }
+    }
+
+    path
+}
+
+fn prepare_command(program: &str, cwd: Option<&Path>) -> Command {
+    let mut command = Command::new(resolve_program(program));
     if let Some(path) = cwd {
         command.current_dir(path);
     }
+    if let Some(path) = augmented_path_value() {
+        command.env("PATH", path);
+    }
+    #[cfg(target_os = "windows")]
+    {
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    command
+}
+
+fn run_command(program: &str, args: &[&str], cwd: Option<&Path>) -> Result<String, String> {
+    let mut command = prepare_command(program, cwd);
+    command.args(args);
 
     let output = command
         .output()
@@ -100,11 +222,8 @@ fn run_command(program: &str, args: &[&str], cwd: Option<&Path>) -> Result<Strin
 }
 
 fn run_command_owned(program: &str, args: &[String], cwd: Option<&Path>) -> Result<String, String> {
-    let mut command = Command::new(program);
+    let mut command = prepare_command(program, cwd);
     command.args(args);
-    if let Some(path) = cwd {
-        command.current_dir(path);
-    }
 
     let output = command
         .output()

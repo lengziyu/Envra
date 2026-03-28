@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Download, Trash2, RefreshCw } from "lucide-react";
 import { useI18n } from "@/i18n";
-import { listTools, manageTool, ToolItem } from "@/lib/native";
+import { useEnvironmentStore } from "@/stores/environment";
 
 function formatVersion(version?: string): string {
   if (!version) return "—";
@@ -18,28 +18,19 @@ function formatVersion(version?: string): string {
 }
 
 export function ToolsPage() {
-  const [tools, setTools] = useState<ToolItem[]>([]);
-  const [loading, setLoading] = useState(true);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
-  const [error, setError] = useState("");
   const { t, locale } = useI18n();
-
-  const refreshTools = async () => {
-    try {
-      setLoading(true);
-      setError("");
-      const result = await listTools();
-      setTools(result);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setLoading(false);
-    }
-  };
+  const tools = useEnvironmentStore((state) => state.tools);
+  const loading = useEnvironmentStore((state) => state.toolsLoading);
+  const error = useEnvironmentStore((state) => state.toolsError);
+  const loadTools = useEnvironmentStore((state) => state.loadTools);
+  const manageToolAndRefresh = useEnvironmentStore(
+    (state) => state.manageToolAndRefresh
+  );
 
   useEffect(() => {
-    void refreshTools();
+    void loadTools();
   }, []);
 
   const runAction = async (
@@ -49,12 +40,10 @@ export function ToolsPage() {
     try {
       setBusyKey(`${toolId}:${action}`);
       setNotice("");
-      setError("");
-      const result = await manageTool(toolId, action);
-      setNotice(result.message || "Done.");
-      await refreshTools();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      const message = await manageToolAndRefresh(toolId, action);
+      setNotice(message || "Done.");
+    } catch {
+      // The store already exposes the latest error message for the page.
     } finally {
       setBusyKey(null);
     }
@@ -76,7 +65,11 @@ export function ToolsPage() {
           <h1 className="text-2xl font-bold tracking-tight">{t.tools.title}</h1>
           <p className="text-muted-foreground mt-1">{t.tools.subtitle}</p>
         </div>
-        <Button variant="outline" className="gap-2" onClick={() => void refreshTools()}>
+        <Button
+          variant="outline"
+          className="gap-2"
+          onClick={() => void loadTools(true)}
+        >
           <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
           {locale === "zh" ? "刷新" : "Refresh"}
         </Button>

@@ -16,7 +16,7 @@ import {
   Wrench,
 } from "lucide-react";
 import { useI18n } from "@/i18n";
-import { DiagnosticItem, fixIssue, scanEnvironment } from "@/lib/native";
+import { useEnvironmentStore } from "@/stores/environment";
 
 const statusIcon = {
   ok: <CheckCircle2 className="h-4 w-4 text-emerald-500" />,
@@ -25,12 +25,14 @@ const statusIcon = {
 };
 
 export function DoctorPage() {
-  const [diagnostics, setDiagnostics] = useState<DiagnosticItem[]>([]);
   const [scanning, setScanning] = useState(false);
   const [fixingId, setFixingId] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
-  const [error, setError] = useState("");
   const { t, locale } = useI18n();
+  const diagnostics = useEnvironmentStore((state) => state.diagnostics);
+  const error = useEnvironmentStore((state) => state.envError);
+  const loadEnvironment = useEnvironmentStore((state) => state.loadEnvironment);
+  const fixAndRefresh = useEnvironmentStore((state) => state.fixAndRefresh);
 
   const statusBadge = {
     ok: <Badge variant="success">{t.common.ok}</Badge>,
@@ -41,11 +43,7 @@ export function DoctorPage() {
   const handleScan = async () => {
     try {
       setScanning(true);
-      setError("");
-      const result = await scanEnvironment();
-      setDiagnostics(result);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      await loadEnvironment(true);
     } finally {
       setScanning(false);
     }
@@ -59,7 +57,6 @@ export function DoctorPage() {
     try {
       setFixingId(id);
       setNotice("");
-      setError("");
       let inputValue: string | undefined;
 
       if (id === "git-config-name") {
@@ -77,11 +74,10 @@ export function DoctorPage() {
         inputValue = value;
       }
 
-      const result = await fixIssue(id, inputValue);
-      setNotice(result.message || (locale === "zh" ? "修复完成。" : "Fixed."));
-      await handleScan();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      const message = await fixAndRefresh(id, inputValue);
+      setNotice(message || (locale === "zh" ? "修复完成。" : "Fixed."));
+    } catch {
+      // The store already exposes the latest error message for the page.
     } finally {
       setFixingId(null);
     }
