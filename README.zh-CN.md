@@ -63,7 +63,7 @@ src-tauri/target/release/bundle/
 
 - `.github/workflows/release.yml`
 
-当你推送 `v*` 格式标签（例如 `v0.1.7`）后，工作流会在 macOS / Linux / Windows 构建并上传安装包到 GitHub Releases。
+当你推送 `v*` 格式标签（例如 `v0.1.8`）后，工作流会在 macOS / Linux / Windows 构建并上传安装包到 GitHub Releases。
 
 ### 发布步骤
 
@@ -71,8 +71,8 @@ src-tauri/target/release/bundle/
 2. 创建并推送版本标签：
 
 ```bash
-git tag v0.1.7
-git push origin v0.1.7
+git tag v0.1.8
+git push origin v0.1.8
 ```
 
 3. 打开 GitHub Actions，等待 `Release` 工作流完成。

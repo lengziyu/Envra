@@ -34,6 +34,24 @@ export interface ActionResult {
   message: string;
 }
 
+export interface NodeVersionItem {
+  version: string;
+  isActive: boolean;
+  nodePath?: string;
+  npmVersion?: string;
+  pnpmVersion?: string;
+  yarnVersion?: string;
+}
+
+export interface NodeRuntimeInfo {
+  manager: "nvm" | "nvm-windows" | "none" | string;
+  available: boolean;
+  activeVersion?: string;
+  installedVersions: NodeVersionItem[];
+  stableVersions: string[];
+  message?: string;
+}
+
 export interface CreateProjectPayload {
   projectName: string;
   template: string;
@@ -122,6 +140,34 @@ export async function manageTool(
     return { success: true, message: "Done in demo mode." };
   }
   return invoke<ActionResult>("manage_tool", { toolId, action });
+}
+
+export async function getNodeRuntimeInfo(): Promise<NodeRuntimeInfo> {
+  if (!isTauriRuntime) {
+    return {
+      manager: "none",
+      available: false,
+      activeVersion: "v22.0.0",
+      installedVersions: [],
+      stableVersions: ["14", "16", "18", "20", "22", "24"],
+      message: "nvm is required in desktop runtime.",
+    };
+  }
+  return invoke<NodeRuntimeInfo>("get_node_runtime_info");
+}
+
+export async function installNodeVersion(version: string): Promise<ActionResult> {
+  if (!isTauriRuntime) {
+    return { success: true, message: `Simulated install: ${version}` };
+  }
+  return invoke<ActionResult>("install_node_version", { version });
+}
+
+export async function switchNodeVersion(version: string): Promise<ActionResult> {
+  if (!isTauriRuntime) {
+    return { success: true, message: `Simulated switch: ${version}` };
+  }
+  return invoke<ActionResult>("switch_node_version", { version });
 }
 
 export async function defaultProjectBase(): Promise<string> {

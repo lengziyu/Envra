@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::BTreeMap,
     env, fs,
     path::{Path, PathBuf},
     process::{Command, Output},
@@ -56,6 +57,43 @@ struct CreateProjectResult {
     success: bool,
     path: String,
     message: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NodeVersionItem {
+    version: String,
+    is_active: bool,
+    node_path: Option<String>,
+    npm_version: Option<String>,
+    pnpm_version: Option<String>,
+    yarn_version: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NodeRuntimeInfo {
+    manager: String,
+    available: bool,
+    active_version: Option<String>,
+    installed_versions: Vec<NodeVersionItem>,
+    stable_versions: Vec<String>,
+    message: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
+struct Semver {
+    major: u32,
+    minor: u32,
+    patch: u32,
+}
+
+enum NodeManager {
+    None,
+    #[cfg(not(target_os = "windows"))]
+    NvmUnix { nvm_dir: PathBuf },
+    #[cfg(target_os = "windows")]
+    NvmWindows { nvm_home: PathBuf },
 }
 
 #[derive(Debug, Deserialize)]
@@ -333,20 +371,362 @@ fn npm_version_fallback() -> Option<String> {
     None
 }
 
-fn package_version_with_corepack(name: &str) -> Option<String> {
+fn parse_semver(raw: &str) -> Option<Semver> {
+    let cleaned = raw
+        .trim()
+        .trim_start_matches(|c| c == 'v' || c == 'V')
+        .trim_matches(|c: char| !c.is_ascii_digit() && c != '.');
+    let mut parts = cleaned.split('.');
+    let major = parts.next()?.parse::<u32>().ok()?;
+    let minor = parts.next()?.parse::<u32>().ok()?;
+    let patch = parts.next()?.parse::<u32>().ok()?;
+    if parts.next().is_some() {
+        return None;
+    }
+    Some(Semver { major, minor, patch })
+}
+
+fn semver_to_version(semver: Semver) -> String {
+    format!("v{}.{}.{}", semver.major, semver.minor, semver.patch)
+}
+
+fn normalize_version(raw: &str) -> Option<String> {
+    parse_semver(raw).map(semver_to_version)
+}
+
+fn package_json_version(package_dir: &Path) -> Option<String> {
+    let content = fs::read_to_string(package_dir.join("package.json")).ok()?;
+    let parsed = serde_json::from_str::<serde_json::Value>(&content).ok()?;
+    parsed
+        .get("version")
+        .and_then(|value| value.as_str())
+        .map(|value| value.to_string())
+}
+
+fn current_node_version() -> Option<String> {
+    non_empty(run_command("node", &["--version"], None)).and_then(|value| normalize_version(&value))
+}
+
+fn target_node_majors() -> Vec<u32> {
+    (14..=24).collect()
+}
+
+fn detect_node_manager() -> NodeManager {
+    #[cfg(target_os = "windows")]
+    {
+        if let Some(home) = env::var_os("NVM_HOME").map(PathBuf::from) {
+            if home.exists() {
+                return NodeManager::NvmWindows { nvm_home: home };
+            }
+        }
+
+        if let Some(home) = home_dir() {
+            let roaming = home.join("AppData/Roaming/nvm");
+            if roaming.exists() {
+                return NodeManager::NvmWindows { nvm_home: roaming };
+            }
+        }
+
+        let nvm_exec = resolve_program("nvm");
+        if nvm_exec.exists() {
+            if let Some(parent) = nvm_exec.parent() {
+                return NodeManager::NvmWindows {
+                    nvm_home: parent.to_path_buf(),
+                };
+            }
+        }
+
+        NodeManager::None
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let nvm_dir = env::var_os("NVM_DIR")
+            .map(PathBuf::from)
+            .or_else(|| home_dir().map(|home| home.join(".nvm")));
+
+        if let Some(dir) = nvm_dir {
+            if dir.join("nvm.sh").exists() {
+                return NodeManager::NvmUnix { nvm_dir: dir };
+            }
+        }
+
+        NodeManager::None
+    }
+}
+
+fn manager_label(manager: &NodeManager) -> String {
+    match manager {
+        #[cfg(not(target_os = "windows"))]
+        NodeManager::NvmUnix { .. } => "nvm".into(),
+        #[cfg(target_os = "windows")]
+        NodeManager::NvmWindows { .. } => "nvm-windows".into(),
+        NodeManager::None => "none".into(),
+    }
+}
+
+fn quoted_shell(value: &str) -> String {
+    if value
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || "-_./:@".contains(ch))
+    {
+        value.to_string()
+    } else {
+        format!("'{}'", value.replace('\'', "'\"'\"'"))
+    }
+}
+
+fn run_nvm_shell(nvm_dir: &Path, command: &str) -> Result<String, String> {
+    let nvm_dir_str = quoted_shell(&nvm_dir.to_string_lossy());
+    let script = format!(
+        "export NVM_DIR={nvm_dir_str}; [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\"; {command}"
+    );
+    run_command("bash", &["-lc", &script], None)
+}
+
+fn run_nvm_command(manager: &NodeManager, args: &[&str]) -> Result<String, String> {
+    match manager {
+        #[cfg(target_os = "windows")]
+        NodeManager::NvmWindows { .. } => run_command("nvm", args, None),
+        #[cfg(not(target_os = "windows"))]
+        NodeManager::NvmUnix { nvm_dir } => {
+            let joined = args
+                .iter()
+                .map(|value| quoted_shell(value))
+                .collect::<Vec<_>>()
+                .join(" ");
+            let command = format!("nvm {joined}");
+            run_nvm_shell(nvm_dir, &command)
+        }
+        NodeManager::None => Err("nvm is not installed or not detected.".into()),
+    }
+}
+
+fn list_nvm_installations(manager: &NodeManager) -> Vec<(Semver, String, PathBuf)> {
+    let root = match manager {
+        #[cfg(not(target_os = "windows"))]
+        NodeManager::NvmUnix { nvm_dir } => nvm_dir.join("versions/node"),
+        #[cfg(target_os = "windows")]
+        NodeManager::NvmWindows { nvm_home } => nvm_home.to_path_buf(),
+        NodeManager::None => return Vec::new(),
+    };
+
+    let mut versions = Vec::new();
+    let Ok(entries) = fs::read_dir(root) else {
+        return versions;
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
+            continue;
+        };
+        let Some(semver) = parse_semver(name) else {
+            continue;
+        };
+        versions.push((semver, semver_to_version(semver), path));
+    }
+
+    versions.sort_by(|left, right| right.0.cmp(&left.0));
+    versions
+}
+
+fn npm_cli_for_install_dir(install_dir: &Path) -> Option<PathBuf> {
+    let candidates = [
+        install_dir.join("lib/node_modules/npm/bin/npm-cli.js"),
+        install_dir.join("node_modules/npm/bin/npm-cli.js"),
+    ];
+    candidates.into_iter().find(|candidate| candidate.exists())
+}
+
+fn npm_exec_for_install_dir(install_dir: &Path) -> Option<PathBuf> {
+    #[cfg(target_os = "windows")]
+    let candidates = [install_dir.join("npm.cmd"), install_dir.join("npm")];
+    #[cfg(not(target_os = "windows"))]
+    let candidates = [install_dir.join("bin/npm"), install_dir.join("npm")];
+    candidates.into_iter().find(|candidate| candidate.exists())
+}
+
+fn package_exec_for_install_dir(install_dir: &Path, package: &str) -> Option<PathBuf> {
+    #[cfg(target_os = "windows")]
+    let candidates = [
+        install_dir.join(format!("{package}.cmd")),
+        install_dir.join(package),
+    ];
+    #[cfg(not(target_os = "windows"))]
+    let candidates = [
+        install_dir.join(format!("bin/{package}")),
+        install_dir.join(package),
+    ];
+    candidates.into_iter().find(|candidate| candidate.exists())
+}
+
+fn npm_global_root_for_node(node_exec: &Path, npm_cli: &Path) -> Option<PathBuf> {
+    let node = node_exec.to_str()?;
+    let cli = npm_cli.to_str()?;
+    let root = non_empty(run_command(node, &[cli, "root", "-g"], None))?;
+    let path = PathBuf::from(root);
+    if path.exists() {
+        Some(path)
+    } else {
+        None
+    }
+}
+
+fn detect_global_package_version(modules_root: Option<&Path>, package: &str) -> Option<String> {
+    modules_root.and_then(|root| package_json_version(&root.join(package)))
+}
+
+fn inspect_nvm_installation(version: &str, install_dir: &Path, active_version: Option<&str>) -> NodeVersionItem {
+    #[cfg(target_os = "windows")]
+    let node_exec = install_dir.join("node.exe");
+    #[cfg(not(target_os = "windows"))]
+    let node_exec = install_dir.join("bin/node");
+
+    let npm_exec = npm_exec_for_install_dir(install_dir);
+    let npm_cli = npm_cli_for_install_dir(install_dir);
+
+    let npm_version = npm_exec
+        .as_ref()
+        .and_then(|path| version_from_executable(path, &["--version"]))
+        .or_else(|| {
+            let node = node_exec.to_str()?;
+            let cli = npm_cli.as_ref()?.to_str()?;
+            non_empty(run_command(node, &[cli, "--version"], None))
+        });
+
+    let modules_root = if node_exec.exists() {
+        npm_cli
+            .as_ref()
+            .and_then(|cli| npm_global_root_for_node(&node_exec, cli))
+            .or_else(|| {
+                #[cfg(target_os = "windows")]
+                {
+                    let root = install_dir.join("node_modules");
+                    if root.exists() {
+                        return Some(root);
+                    }
+                }
+                #[cfg(not(target_os = "windows"))]
+                {
+                    let root = install_dir.join("lib/node_modules");
+                    if root.exists() {
+                        return Some(root);
+                    }
+                }
+                None
+            })
+    } else {
+        None
+    };
+
+    let pnpm_version = package_exec_for_install_dir(install_dir, "pnpm")
+        .as_ref()
+        .and_then(|path| version_from_executable(path, &["--version"]))
+        .or_else(|| detect_global_package_version(modules_root.as_deref(), "pnpm"));
+    let yarn_version = package_exec_for_install_dir(install_dir, "yarn")
+        .as_ref()
+        .and_then(|path| version_from_executable(path, &["--version"]))
+        .or_else(|| detect_global_package_version(modules_root.as_deref(), "yarn"));
+
+    NodeVersionItem {
+        version: version.to_string(),
+        is_active: active_version.map(|current| current == version).unwrap_or(false),
+        node_path: if node_exec.exists() {
+            Some(node_exec.to_string_lossy().to_string())
+        } else {
+            None
+        },
+        npm_version,
+        pnpm_version,
+        yarn_version,
+    }
+}
+
+fn stable_versions_from_text(output: &str) -> Vec<String> {
+    let majors = target_node_majors();
+    let mut by_major: BTreeMap<u32, Semver> = BTreeMap::new();
+
+    for token in output.split_whitespace() {
+        let Some(semver) = parse_semver(token) else {
+            continue;
+        };
+        if !majors.contains(&semver.major) {
+            continue;
+        }
+        let entry = by_major.entry(semver.major).or_insert(semver);
+        if semver > *entry {
+            *entry = semver;
+        }
+    }
+
+    majors
+        .into_iter()
+        .map(|major| {
+            by_major
+                .get(&major)
+                .copied()
+                .map(semver_to_version)
+                .unwrap_or_else(|| major.to_string())
+        })
+        .collect()
+}
+
+fn load_stable_versions(manager: &NodeManager) -> Vec<String> {
+    let fallback = target_node_majors()
+        .into_iter()
+        .map(|major| major.to_string())
+        .collect::<Vec<_>>();
+
+    let remote = match manager {
+        #[cfg(target_os = "windows")]
+        NodeManager::NvmWindows { .. } => run_nvm_command(manager, &["list", "available"]).ok(),
+        #[cfg(not(target_os = "windows"))]
+        NodeManager::NvmUnix { .. } => run_nvm_command(manager, &["ls-remote", "--lts", "--no-colors"]).ok(),
+        NodeManager::None => None,
+    };
+
+    let Some(output) = remote else {
+        return fallback;
+    };
+    let parsed = stable_versions_from_text(&output);
+    if parsed.is_empty() { fallback } else { parsed }
+}
+
+fn package_manager_version(name: &str) -> Option<String> {
     non_empty(run_command(name, &["--version"], None))
-        .or_else(|| non_empty(run_command("corepack", &[name, "--version"], None)))
+}
+
+fn nvm_version_arg(version: &str) -> Option<String> {
+    let trimmed = version.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if let Some(semver) = parse_semver(trimmed) {
+        return Some(format!("{}.{}.{}", semver.major, semver.minor, semver.patch));
+    }
+    if trimmed.chars().all(|ch| ch.is_ascii_digit()) {
+        return Some(trimmed.to_string());
+    }
+    Some(trimmed.trim_start_matches(|ch| ch == 'v' || ch == 'V').to_string())
 }
 
 fn package_manager_exists(name: &str) -> bool {
+    if name == "npm" {
+        return non_empty(run_command("npm", &["--version"], None))
+            .or_else(npm_version_fallback)
+            .is_some();
+    }
     run_command(name, &["--version"], None).is_ok()
 }
 
 fn build_diagnostics() -> Vec<DiagnosticItem> {
     let node_version = non_empty(run_command("node", &["--version"], None));
     let npm_version = non_empty(run_command("npm", &["--version"], None)).or_else(npm_version_fallback);
-    let pnpm_version = package_version_with_corepack("pnpm");
-    let yarn_version = package_version_with_corepack("yarn");
+    let pnpm_version = package_manager_version("pnpm");
+    let yarn_version = package_manager_version("yarn");
     let git_version = non_empty(run_command("git", &["--version"], None));
     let node_ok = node_version.is_some();
     let npm_ok = npm_version.is_some();
@@ -646,6 +1026,101 @@ fn list_tools() -> Vec<ToolItem> {
 }
 
 #[tauri::command]
+fn get_node_runtime_info() -> NodeRuntimeInfo {
+    let manager = detect_node_manager();
+    let manager_name = manager_label(&manager);
+    let active_version = current_node_version();
+
+    let mut installed_versions = list_nvm_installations(&manager)
+        .into_iter()
+        .map(|(_, version, path)| inspect_nvm_installation(&version, &path, active_version.as_deref()))
+        .collect::<Vec<_>>();
+
+    if installed_versions.is_empty() {
+        let node_path = resolve_program("node");
+        if node_path.exists() {
+            installed_versions.push(NodeVersionItem {
+                version: active_version.clone().unwrap_or_else(|| "unknown".into()),
+                is_active: true,
+                node_path: Some(node_path.to_string_lossy().to_string()),
+                npm_version: non_empty(run_command("npm", &["--version"], None)).or_else(npm_version_fallback),
+                pnpm_version: package_manager_version("pnpm"),
+                yarn_version: package_manager_version("yarn"),
+            });
+        }
+    }
+
+    let message = match &manager {
+        NodeManager::None => Some("nvm was not detected. Install nvm (or nvm-windows) to manage multiple Node versions.".into()),
+        _ => None,
+    };
+
+    NodeRuntimeInfo {
+        manager: manager_name,
+        available: !matches!(manager, NodeManager::None),
+        active_version,
+        installed_versions,
+        stable_versions: load_stable_versions(&manager),
+        message,
+    }
+}
+
+#[tauri::command]
+fn install_node_version(version: String) -> Result<ActionResult, String> {
+    let manager = detect_node_manager();
+    if matches!(manager, NodeManager::None) {
+        return Err("nvm is not available. Please install nvm (or nvm-windows) first.".into());
+    }
+
+    let Some(version_arg) = nvm_version_arg(&version) else {
+        return Err("Version is required.".into());
+    };
+
+    let output = run_nvm_command(&manager, &["install", &version_arg])?;
+    Ok(ActionResult {
+        success: true,
+        message: if output.is_empty() {
+            format!("Node {version_arg} installed.")
+        } else {
+            output
+        },
+    })
+}
+
+#[tauri::command]
+fn switch_node_version(version: String) -> Result<ActionResult, String> {
+    let manager = detect_node_manager();
+    if matches!(manager, NodeManager::None) {
+        return Err("nvm is not available. Please install nvm (or nvm-windows) first.".into());
+    }
+
+    let Some(version_arg) = nvm_version_arg(&version) else {
+        return Err("Version is required.".into());
+    };
+
+    let output = match &manager {
+        #[cfg(target_os = "windows")]
+        NodeManager::NvmWindows { .. } => run_nvm_command(&manager, &["use", &version_arg])?,
+        #[cfg(not(target_os = "windows"))]
+        NodeManager::NvmUnix { nvm_dir } => {
+            let quoted = quoted_shell(&version_arg);
+            let command = format!("nvm use {quoted} && nvm alias default {quoted}");
+            run_nvm_shell(nvm_dir, &command)?
+        }
+        NodeManager::None => unreachable!(),
+    };
+
+    Ok(ActionResult {
+        success: true,
+        message: if output.is_empty() {
+            format!("Switched to Node {version_arg}.")
+        } else {
+            output
+        },
+    })
+}
+
+#[tauri::command]
 fn manage_tool(tool_id: String, action: String) -> Result<ActionResult, String> {
     if !package_manager_exists("npm") {
         return Err("npm is required to manage tools.".into());
@@ -838,6 +1313,9 @@ pub fn run() {
             scan_environment,
             get_system_info,
             list_tools,
+            get_node_runtime_info,
+            install_node_version,
+            switch_node_version,
             manage_tool,
             fix_issue,
             default_project_base,
