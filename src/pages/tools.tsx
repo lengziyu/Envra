@@ -14,7 +14,12 @@ import { useEnvironmentStore } from "@/stores/environment";
 
 function formatVersion(version?: string): string {
   if (!version) return "—";
-  return version.startsWith("v") ? version : `v${version}`;
+  const normalized = version.trim();
+  if (!normalized) return "—";
+  if (/^v+/i.test(normalized)) {
+    return `v${normalized.replace(/^v+/i, "")}`;
+  }
+  return /^\d/.test(normalized) ? `v${normalized}` : normalized;
 }
 
 export function ToolsPage() {

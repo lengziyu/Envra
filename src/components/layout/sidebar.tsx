@@ -15,11 +15,11 @@ export function Sidebar() {
   const location = useLocation();
   const navigate = useNavigate();
   const { t } = useI18n();
-  const [appVersion, setAppVersion] = useState("0.1.6");
+  const [appVersion, setAppVersion] = useState("0.1.7");
 
   useEffect(() => {
     getVersion().then(setAppVersion).catch(() => {
-      setAppVersion("0.1.6");
+      setAppVersion("0.1.7");
     });
   }, []);
 

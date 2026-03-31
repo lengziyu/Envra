@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     env, fs,
     path::{Path, PathBuf},
-    process::Command,
+    process::{Command, Output},
 };
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
@@ -181,7 +181,33 @@ fn resolve_program(program: &str) -> PathBuf {
 }
 
 fn prepare_command(program: &str, cwd: Option<&Path>) -> Command {
-    let mut command = Command::new(resolve_program(program));
+    let resolved = resolve_program(program);
+    #[cfg(target_os = "windows")]
+    let mut command = {
+        let extension = resolved
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .map(|ext| ext.to_ascii_lowercase());
+        let use_cmd = matches!(extension.as_deref(), Some("cmd" | "bat"))
+            || matches!(program, "npm" | "npx" | "pnpm" | "yarn" | "corepack");
+
+        if use_cmd {
+            let mut cmd = Command::new("cmd");
+            cmd.arg("/C");
+            if resolved.exists() {
+                cmd.arg(&resolved);
+            } else {
+                cmd.arg(program);
+            }
+            cmd
+        } else {
+            Command::new(&resolved)
+        }
+    };
+
+    #[cfg(not(target_os = "windows"))]
+    let mut command = Command::new(&resolved);
+
     if let Some(path) = cwd {
         command.current_dir(path);
     }
@@ -195,13 +221,18 @@ fn prepare_command(program: &str, cwd: Option<&Path>) -> Command {
     command
 }
 
-fn run_command(program: &str, args: &[&str], cwd: Option<&Path>) -> Result<String, String> {
+fn run_command_output(program: &str, args: &[String], cwd: Option<&Path>) -> Result<Output, String> {
     let mut command = prepare_command(program, cwd);
     command.args(args);
-
-    let output = command
+    command
         .output()
-        .map_err(|err| format!("failed to execute {program}: {err}"))?;
+        .map_err(|err| format!("failed to execute {program}: {err}"))
+}
+
+fn run_command(program: &str, args: &[&str], cwd: Option<&Path>) -> Result<String, String> {
+    let args: Vec<String> = args.iter().map(|arg| (*arg).to_string()).collect();
+
+    let output = run_command_output(program, &args, cwd)?;
 
     let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
@@ -222,12 +253,7 @@ fn run_command(program: &str, args: &[&str], cwd: Option<&Path>) -> Result<Strin
 }
 
 fn run_command_owned(program: &str, args: &[String], cwd: Option<&Path>) -> Result<String, String> {
-    let mut command = prepare_command(program, cwd);
-    command.args(args);
-
-    let output = command
-        .output()
-        .map_err(|err| format!("failed to execute {program}: {err}"))?;
+    let output = run_command_output(program, args, cwd)?;
 
     let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
@@ -258,15 +284,69 @@ fn non_empty(value: Result<String, String>) -> Option<String> {
     })
 }
 
+fn version_from_executable(exec_path: &Path, args: &[&str]) -> Option<String> {
+    let exec = exec_path.to_str()?;
+    non_empty(run_command(exec, args, None))
+}
+
+fn npm_version_fallback() -> Option<String> {
+    let node_exec = resolve_program("node");
+    if !node_exec.exists() {
+        return None;
+    }
+
+    let node_dir = node_exec.parent()?;
+
+    #[cfg(target_os = "windows")]
+    {
+        let npm_cmd = node_dir.join("npm.cmd");
+        if let Some(version) = version_from_executable(&npm_cmd, &["--version"]) {
+            return Some(version);
+        }
+    }
+
+    let npm_exec = node_dir.join("npm");
+    if let Some(version) = version_from_executable(&npm_exec, &["--version"]) {
+        return Some(version);
+    }
+
+    let script_candidates = [
+        node_dir.join("node_modules/npm/bin/npm-cli.js"),
+        node_dir.join("../lib/node_modules/npm/bin/npm-cli.js"),
+    ];
+
+    for script in script_candidates {
+        if !script.exists() {
+            continue;
+        }
+        let Some(node_str) = node_exec.to_str() else {
+            continue;
+        };
+        let Some(script_str) = script.to_str() else {
+            continue;
+        };
+        if let Some(version) = non_empty(run_command(node_str, &[script_str, "--version"], None)) {
+            return Some(version);
+        }
+    }
+
+    None
+}
+
+fn package_version_with_corepack(name: &str) -> Option<String> {
+    non_empty(run_command(name, &["--version"], None))
+        .or_else(|| non_empty(run_command("corepack", &[name, "--version"], None)))
+}
+
 fn package_manager_exists(name: &str) -> bool {
     run_command(name, &["--version"], None).is_ok()
 }
 
 fn build_diagnostics() -> Vec<DiagnosticItem> {
     let node_version = non_empty(run_command("node", &["--version"], None));
-    let npm_version = non_empty(run_command("npm", &["--version"], None));
-    let pnpm_version = non_empty(run_command("pnpm", &["--version"], None));
-    let yarn_version = non_empty(run_command("yarn", &["--version"], None));
+    let npm_version = non_empty(run_command("npm", &["--version"], None)).or_else(npm_version_fallback);
+    let pnpm_version = package_version_with_corepack("pnpm");
+    let yarn_version = package_version_with_corepack("yarn");
     let git_version = non_empty(run_command("git", &["--version"], None));
     let node_ok = node_version.is_some();
     let npm_ok = npm_version.is_some();
