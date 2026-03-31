@@ -17,6 +17,7 @@ export const zh = {
     doctor: "环境诊断",
     tools: "工具管理",
     init: "项目初始化",
+    software: "常用软件",
     settings: "设置",
   },
   dashboard: {

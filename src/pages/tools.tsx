@@ -8,17 +8,9 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { openUrl } from "@tauri-apps/plugin-opener";
-import type { LucideIcon } from "lucide-react";
 import {
   ArrowRightLeft,
-  Boxes,
-  Code2,
   Download,
-  ExternalLink,
-  GitBranch,
-  Globe,
-  Package,
   RefreshCw,
   Trash2,
 } from "lucide-react";
@@ -32,6 +24,12 @@ import {
 } from "@/lib/native";
 import { useEnvironmentStore } from "@/stores/environment";
 
+const RUNTIME_TTL_MS = 60_000;
+let runtimeCache: { data: NodeRuntimeInfo | null; loadedAt: number } = {
+  data: null,
+  loadedAt: 0,
+};
+
 function formatVersion(version?: string): string {
   if (!version) return "—";
   const normalized = version.trim();
@@ -41,64 +39,6 @@ function formatVersion(version?: string): string {
   }
   return /^\d/.test(normalized) ? `v${normalized}` : normalized;
 }
-
-interface DownloadApp {
-  id: string;
-  name: string;
-  descriptionZh: string;
-  descriptionEn: string;
-  tags: string[];
-  url: string;
-  icon: LucideIcon;
-}
-
-const POPULAR_APPS: DownloadApp[] = [
-  {
-    id: "chrome",
-    name: "Google Chrome",
-    descriptionZh: "跨平台主流浏览器，前端调试与兼容性测试常用。",
-    descriptionEn: "Popular cross-platform browser for frontend debugging and compatibility testing.",
-    tags: ["Browser", "Frontend"],
-    url: "https://www.google.com/chrome/",
-    icon: Globe,
-  },
-  {
-    id: "vscode",
-    name: "Visual Studio Code",
-    descriptionZh: "轻量且强扩展能力的代码编辑器。",
-    descriptionEn: "Lightweight editor with a strong extension ecosystem.",
-    tags: ["Editor", "IDE"],
-    url: "https://code.visualstudio.com/",
-    icon: Code2,
-  },
-  {
-    id: "postman",
-    name: "Postman",
-    descriptionZh: "API 调试和接口测试工具。",
-    descriptionEn: "API debugging and endpoint testing platform.",
-    tags: ["API", "Testing"],
-    url: "https://www.postman.com/downloads/",
-    icon: Package,
-  },
-  {
-    id: "git",
-    name: "Git",
-    descriptionZh: "分布式版本控制工具。",
-    descriptionEn: "Distributed version control system.",
-    tags: ["Version Control"],
-    url: "https://git-scm.com/downloads",
-    icon: GitBranch,
-  },
-  {
-    id: "docker",
-    name: "Docker Desktop",
-    descriptionZh: "本地容器开发与运行环境。",
-    descriptionEn: "Containerized local development and runtime environment.",
-    tags: ["Container", "DevOps"],
-    url: "https://www.docker.com/products/docker-desktop/",
-    icon: Boxes,
-  },
-];
 
 function majorOf(version?: string): number | null {
   if (!version) return null;
@@ -122,6 +62,7 @@ export function ToolsPage() {
   const [notice, setNotice] = useState("");
   const [runtime, setRuntime] = useState<NodeRuntimeInfo | null>(null);
   const [runtimeLoading, setRuntimeLoading] = useState(false);
+  const [hasRuntimeLoaded, setHasRuntimeLoaded] = useState(false);
   const [runtimeError, setRuntimeError] = useState("");
   const { t, locale } = useI18n();
   const tools = useEnvironmentStore((state) => state.tools);
@@ -133,18 +74,34 @@ export function ToolsPage() {
     (state) => state.manageToolAndRefresh
   );
 
-  const loadRuntime = async () => {
+  const loadRuntime = async (force = false) => {
+    const cacheValid =
+      !force &&
+      runtimeCache.data &&
+      Date.now() - runtimeCache.loadedAt < RUNTIME_TTL_MS;
+    if (cacheValid) {
+      setRuntime(runtimeCache.data);
+      setHasRuntimeLoaded(true);
+      return;
+    }
+
     try {
       setRuntimeLoading(true);
       setRuntimeError("");
       const info = await getNodeRuntimeInfo();
       setRuntime(info);
+      runtimeCache = {
+        data: info,
+        loadedAt: Date.now(),
+      };
+      setHasRuntimeLoaded(true);
     } catch (runtimeLoadError) {
       setRuntimeError(
         runtimeLoadError instanceof Error
           ? runtimeLoadError.message
           : String(runtimeLoadError)
       );
+      setHasRuntimeLoaded(true);
     } finally {
       setRuntimeLoading(false);
     }
@@ -152,7 +109,7 @@ export function ToolsPage() {
 
   useEffect(() => {
     void loadTools();
-    void loadRuntime();
+    void loadRuntime(false);
   }, []);
 
   const runAction = async (
@@ -184,7 +141,7 @@ export function ToolsPage() {
           : await switchNodeVersion(version);
       setNotice(result.message || (locale === "zh" ? "操作完成。" : "Done."));
       await Promise.all([
-        loadRuntime(),
+        loadRuntime(true),
         loadTools(true),
         loadEnvironment(true),
       ]);
@@ -196,14 +153,6 @@ export function ToolsPage() {
       );
     } finally {
       setBusyKey(null);
-    }
-  };
-
-  const openOfficialSite = async (url: string) => {
-    try {
-      await openUrl(url);
-    } catch {
-      window.open(url, "_blank", "noopener,noreferrer");
     }
   };
 
@@ -219,8 +168,11 @@ export function ToolsPage() {
     ? runtime.stableVersions
     : ["14", "15", "16", "17", "18", "19", "20", "21", "22", "23", "24"];
   const nodeVersions = runtime?.installedVersions ?? [];
-  const managerName =
-    runtime?.manager === "nvm-windows"
+  const managerName = !hasRuntimeLoaded
+    ? locale === "zh"
+      ? "加载中..."
+      : "Loading..."
+    : runtime?.manager === "nvm-windows"
       ? "nvm-windows"
       : runtime?.manager === "nvm"
         ? "nvm"
@@ -238,7 +190,7 @@ export function ToolsPage() {
           className="gap-2"
           onClick={() => {
             void loadTools(true);
-            void loadRuntime();
+            void loadRuntime(true);
             void loadEnvironment(true);
           }}
         >
@@ -266,7 +218,11 @@ export function ToolsPage() {
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex flex-wrap items-center gap-2 text-sm">
-            <Badge variant={runtime?.available ? "success" : "outline"}>
+            <Badge
+              variant={
+                hasRuntimeLoaded && runtime?.available ? "success" : "outline"
+              }
+            >
               {locale === "zh" ? "管理器" : "Manager"}: {managerName}
             </Badge>
             <Badge variant="outline">
@@ -278,122 +234,135 @@ export function ToolsPage() {
             <p className="text-xs text-muted-foreground">{runtime.message}</p>
           )}
 
-          <div className="rounded-lg border p-4">
-            <p className="mb-3 text-sm font-medium">
+          {runtimeLoading && !hasRuntimeLoaded && (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <RefreshCw className="h-4 w-4 animate-spin" />
               {locale === "zh"
-                ? "稳定版本推荐（14 到 24）"
-                : "Stable Version Picks (14 to 24)"}
-            </p>
-            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-              {stableTargets.map((target) => {
-                const installedVersion = findInstalledForTarget(target, nodeVersions);
-                const isCurrent = !!installedVersion?.isActive;
-                const switchVersion = installedVersion?.version ?? target;
-                const action = installedVersion ? "switch" : "install";
-                const isBusy = busyKey === `node:${action}:${switchVersion}`;
-                return (
-                  <div
-                    key={target}
-                    className="flex items-center justify-between rounded-md border p-3"
-                  >
-                    <div>
-                      <p className="text-sm font-medium">{formatVersion(target)}</p>
-                      <div className="mt-1 flex items-center gap-1.5">
-                        {installedVersion ? (
-                          <Badge variant="outline">
-                            {locale === "zh" ? "已安装" : "Installed"}
-                          </Badge>
-                        ) : (
-                          <Badge variant="outline">
-                            {locale === "zh" ? "未安装" : "Not Installed"}
-                          </Badge>
-                        )}
-                        {isCurrent && (
-                          <Badge variant="success">
-                            {locale === "zh" ? "当前" : "Current"}
-                          </Badge>
-                        )}
-                      </div>
-                    </div>
-                    <Button
-                      size="sm"
-                      variant={installedVersion ? "outline" : "default"}
-                      className="gap-1"
-                      disabled={isCurrent || isBusy}
-                      onClick={() =>
-                        void runNodeAction(action, switchVersion)
-                      }
-                    >
-                      {installedVersion ? (
-                        <ArrowRightLeft className="h-3 w-3" />
-                      ) : (
-                        <Download className="h-3 w-3" />
-                      )}
-                      {installedVersion
-                        ? locale === "zh"
-                          ? "切换"
-                          : "Use"
-                        : locale === "zh"
-                          ? "安装"
-                          : "Install"}
-                    </Button>
-                  </div>
-                );
-              })}
+                ? "正在加载 Node 运行时信息..."
+                : "Loading Node runtime details..."}
             </div>
-          </div>
+          )}
 
-          <div className="rounded-lg border p-4">
-            <p className="mb-3 text-sm font-medium">
-              {locale === "zh"
-                ? "已检测 Node 版本（含 npm/pnpm/yarn 归属）"
-                : "Detected Node Versions (with npm/pnpm/yarn mapping)"}
-            </p>
-            {nodeVersions.length === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                {locale === "zh"
-                  ? "未检测到 Node 版本。"
-                  : "No Node runtime detected."}
-              </p>
-            ) : (
-              <div className="space-y-2">
-                {nodeVersions.map((item) => (
-                  <div
-                    key={item.version}
-                    className="flex flex-col gap-3 rounded-md border p-3 lg:flex-row lg:items-center lg:justify-between"
-                  >
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium">
-                          Node {formatVersion(item.version)}
-                        </span>
-                        {item.isActive && (
-                          <Badge variant="success">
-                            {locale === "zh" ? "当前" : "Current"}
-                          </Badge>
-                        )}
+          {hasRuntimeLoaded && (
+            <>
+              <div className="rounded-lg border p-4">
+                <p className="mb-3 text-sm font-medium">
+                  {locale === "zh"
+                    ? "稳定版本推荐（14 到 24）"
+                    : "Stable Version Picks (14 to 24)"}
+                </p>
+                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                  {stableTargets.map((target) => {
+                    const installedVersion = findInstalledForTarget(target, nodeVersions);
+                    const isCurrent = !!installedVersion?.isActive;
+                    const switchVersion = installedVersion?.version ?? target;
+                    const action = installedVersion ? "switch" : "install";
+                    const isBusy = busyKey === `node:${action}:${switchVersion}`;
+                    return (
+                      <div
+                        key={target}
+                        className="flex items-center justify-between rounded-md border p-3"
+                      >
+                        <div>
+                          <p className="text-sm font-medium">{formatVersion(target)}</p>
+                          <div className="mt-1 flex items-center gap-1.5">
+                            {installedVersion ? (
+                              <Badge variant="outline">
+                                {locale === "zh" ? "已安装" : "Installed"}
+                              </Badge>
+                            ) : (
+                              <Badge variant="outline">
+                                {locale === "zh" ? "未安装" : "Not Installed"}
+                              </Badge>
+                            )}
+                            {isCurrent && (
+                              <Badge variant="success">
+                                {locale === "zh" ? "当前" : "Current"}
+                              </Badge>
+                            )}
+                          </div>
+                        </div>
+                        <Button
+                          size="sm"
+                          variant={installedVersion ? "outline" : "default"}
+                          className="gap-1"
+                          disabled={isCurrent || isBusy}
+                          onClick={() =>
+                            void runNodeAction(action, switchVersion)
+                          }
+                        >
+                          {installedVersion ? (
+                            <ArrowRightLeft className="h-3 w-3" />
+                          ) : (
+                            <Download className="h-3 w-3" />
+                          )}
+                          {installedVersion
+                            ? locale === "zh"
+                              ? "切换"
+                              : "Use"
+                            : locale === "zh"
+                              ? "安装"
+                              : "Install"}
+                        </Button>
                       </div>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        npm {formatVersion(item.npmVersion)} · pnpm{" "}
-                        {formatVersion(item.pnpmVersion)} · yarn{" "}
-                        {formatVersion(item.yarnVersion)}
-                      </p>
-                    </div>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="gap-1"
-                      disabled={item.isActive || busyKey === `node:switch:${item.version}`}
-                      onClick={() => void runNodeAction("switch", item.version)}
-                    >
-                      <ArrowRightLeft className="h-3 w-3" />
-                      {locale === "zh" ? "切换到此版本" : "Switch"}
-                    </Button>
-                  </div>
-                ))}
+                    );
+                  })}
+                </div>
               </div>
-            )}
-          </div>
+
+              <div className="rounded-lg border p-4">
+                <p className="mb-3 text-sm font-medium">
+                  {locale === "zh"
+                    ? "已检测 Node 版本（含 npm/pnpm/yarn 归属）"
+                    : "Detected Node Versions (with npm/pnpm/yarn mapping)"}
+                </p>
+                {nodeVersions.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    {locale === "zh"
+                      ? "未检测到 Node 版本。"
+                      : "No Node runtime detected."}
+                  </p>
+                ) : (
+                  <div className="space-y-2">
+                    {nodeVersions.map((item) => (
+                      <div
+                        key={item.version}
+                        className="flex flex-col gap-3 rounded-md border p-3 lg:flex-row lg:items-center lg:justify-between"
+                      >
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-medium">
+                              Node {formatVersion(item.version)}
+                            </span>
+                            {item.isActive && (
+                              <Badge variant="success">
+                                {locale === "zh" ? "当前" : "Current"}
+                              </Badge>
+                            )}
+                          </div>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            npm {formatVersion(item.npmVersion)} · pnpm{" "}
+                            {formatVersion(item.pnpmVersion)} · yarn{" "}
+                            {formatVersion(item.yarnVersion)}
+                          </p>
+                        </div>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="gap-1"
+                          disabled={item.isActive || busyKey === `node:switch:${item.version}`}
+                          onClick={() => void runNodeAction("switch", item.version)}
+                        >
+                          <ArrowRightLeft className="h-3 w-3" />
+                          {locale === "zh" ? "切换到此版本" : "Switch"}
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </>
+          )}
         </CardContent>
       </Card>
 
@@ -499,59 +468,6 @@ export function ToolsPage() {
         </Card>
       )}
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-lg">
-            {locale === "zh" ? "常用开发软件" : "Popular Dev Apps"}
-          </CardTitle>
-          <CardDescription>
-            {locale === "zh"
-              ? "官方站点下载入口（点击直达官网）。"
-              : "Official download links for common development apps."}
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-3">
-            {POPULAR_APPS.map((app) => {
-              const Icon = app.icon;
-              return (
-                <div
-                  key={app.id}
-                  className="flex items-center justify-between rounded-lg border p-4"
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <div className="rounded-md border p-1.5">
-                        <Icon className="h-4 w-4" />
-                      </div>
-                      <span className="text-sm font-medium">{app.name}</span>
-                    </div>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      {locale === "zh" ? app.descriptionZh : app.descriptionEn}
-                    </p>
-                    <div className="mt-2 flex flex-wrap gap-1.5">
-                      {app.tags.map((tag) => (
-                        <Badge key={`${app.id}-${tag}`} variant="outline">
-                          {tag}
-                        </Badge>
-                      ))}
-                    </div>
-                  </div>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="ml-3 gap-1"
-                    onClick={() => void openOfficialSite(app.url)}
-                  >
-                    <ExternalLink className="h-3 w-3" />
-                    {locale === "zh" ? "官网下载" : "Official Site"}
-                  </Button>
-                </div>
-              );
-            })}
-          </div>
-        </CardContent>
-      </Card>
     </div>
   );
 }

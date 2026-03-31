@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::BTreeMap,
     env, fs,
     path::{Path, PathBuf},
     process::{Command, Output},
@@ -563,18 +562,6 @@ fn package_exec_for_install_dir(install_dir: &Path, package: &str) -> Option<Pat
     candidates.into_iter().find(|candidate| candidate.exists())
 }
 
-fn npm_global_root_for_node(node_exec: &Path, npm_cli: &Path) -> Option<PathBuf> {
-    let node = node_exec.to_str()?;
-    let cli = npm_cli.to_str()?;
-    let root = non_empty(run_command(node, &[cli, "root", "-g"], None))?;
-    let path = PathBuf::from(root);
-    if path.exists() {
-        Some(path)
-    } else {
-        None
-    }
-}
-
 fn detect_global_package_version(modules_root: Option<&Path>, package: &str) -> Option<String> {
     modules_root.and_then(|root| package_json_version(&root.join(package)))
 }
@@ -598,26 +585,24 @@ fn inspect_nvm_installation(version: &str, install_dir: &Path, active_version: O
         });
 
     let modules_root = if node_exec.exists() {
-        npm_cli
-            .as_ref()
-            .and_then(|cli| npm_global_root_for_node(&node_exec, cli))
-            .or_else(|| {
-                #[cfg(target_os = "windows")]
-                {
-                    let root = install_dir.join("node_modules");
-                    if root.exists() {
-                        return Some(root);
-                    }
-                }
-                #[cfg(not(target_os = "windows"))]
-                {
-                    let root = install_dir.join("lib/node_modules");
-                    if root.exists() {
-                        return Some(root);
-                    }
-                }
+        #[cfg(target_os = "windows")]
+        {
+            let root = install_dir.join("node_modules");
+            if root.exists() {
+                Some(root)
+            } else {
                 None
-            })
+            }
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let root = install_dir.join("lib/node_modules");
+            if root.exists() {
+                Some(root)
+            } else {
+                None
+            }
+        }
     } else {
         None
     };
@@ -645,54 +630,19 @@ fn inspect_nvm_installation(version: &str, install_dir: &Path, active_version: O
     }
 }
 
-fn stable_versions_from_text(output: &str) -> Vec<String> {
-    let majors = target_node_majors();
-    let mut by_major: BTreeMap<u32, Semver> = BTreeMap::new();
-
-    for token in output.split_whitespace() {
-        let Some(semver) = parse_semver(token) else {
-            continue;
-        };
-        if !majors.contains(&semver.major) {
-            continue;
-        }
-        let entry = by_major.entry(semver.major).or_insert(semver);
-        if semver > *entry {
-            *entry = semver;
-        }
+fn load_stable_versions(manager: &NodeManager) -> Vec<String> {
+    if matches!(manager, NodeManager::None) {
+        return target_node_majors()
+            .into_iter()
+            .map(|major| major.to_string())
+            .collect::<Vec<_>>();
     }
 
-    majors
-        .into_iter()
-        .map(|major| {
-            by_major
-                .get(&major)
-                .copied()
-                .map(semver_to_version)
-                .unwrap_or_else(|| major.to_string())
-        })
-        .collect()
-}
-
-fn load_stable_versions(manager: &NodeManager) -> Vec<String> {
-    let fallback = target_node_majors()
+    // Keep this local and deterministic to avoid slow network calls on page open.
+    target_node_majors()
         .into_iter()
         .map(|major| major.to_string())
-        .collect::<Vec<_>>();
-
-    let remote = match manager {
-        #[cfg(target_os = "windows")]
-        NodeManager::NvmWindows { .. } => run_nvm_command(manager, &["list", "available"]).ok(),
-        #[cfg(not(target_os = "windows"))]
-        NodeManager::NvmUnix { .. } => run_nvm_command(manager, &["ls-remote", "--lts", "--no-colors"]).ok(),
-        NodeManager::None => None,
-    };
-
-    let Some(output) = remote else {
-        return fallback;
-    };
-    let parsed = stable_versions_from_text(&output);
-    if parsed.is_empty() { fallback } else { parsed }
+        .collect::<Vec<_>>()
 }
 
 fn package_manager_version(name: &str) -> Option<String> {

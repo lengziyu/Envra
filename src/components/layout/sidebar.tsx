@@ -5,6 +5,7 @@ import {
   Stethoscope,
   Package,
   FolderPlus,
+  Download,
   Settings,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -28,6 +29,7 @@ export function Sidebar() {
     { path: "/doctor", label: t.sidebar.doctor, icon: Stethoscope },
     { path: "/tools", label: t.sidebar.tools, icon: Package },
     { path: "/init", label: t.sidebar.init, icon: FolderPlus },
+    { path: "/software", label: t.sidebar.software, icon: Download },
     { path: "/settings", label: t.sidebar.settings, icon: Settings },
   ];
 

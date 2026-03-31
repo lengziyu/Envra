@@ -17,6 +17,7 @@ export const en = {
     doctor: "Environment Doctor",
     tools: "Tool Manager",
     init: "Project Init",
+    software: "Dev Software",
     settings: "Settings",
   },
   dashboard: {
