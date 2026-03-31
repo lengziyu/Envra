@@ -64,7 +64,7 @@ This repository includes workflow:
 
 - `.github/workflows/release.yml`
 
-The workflow triggers on tags like `v0.1.8`, builds for macOS/Linux/Windows, and uploads artifacts to GitHub Releases.
+The workflow triggers on tags like `v0.1.10`, builds for macOS/Linux/Windows, and uploads artifacts to GitHub Releases.
 
 ### Release Steps
 
@@ -72,8 +72,8 @@ The workflow triggers on tags like `v0.1.8`, builds for macOS/Linux/Windows, and
 2. Create and push a tag:
 
 ```bash
-git tag v0.1.8
-git push origin v0.1.8
+git tag v0.1.10
+git push origin v0.1.10
 ```
 
 3. Open GitHub Actions and wait for the `Release` workflow to finish.
